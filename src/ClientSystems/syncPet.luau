@@ -21,7 +21,7 @@ folder.Name = "Pets"
 folder.Parent = workspace
 
 local Animals = ReplicatedStorage:WaitForChild("Animals")
-local MESH = { axolotl = "Axolotl", fox = "Fox" } -- weapon id → animal mesh
+local MESH = { axolotl = "Axolotl", fox = "Fox", slime = "Slime", mole = "Mole", bear = "Bear" } -- weapon id → animal mesh
 
 local function makePart(meshName: string): BasePart
     local src = Animals:FindFirstChild(meshName)

@@ -7,3 +7,4 @@ realm = "shared"
 [dependencies]
 jabby = "alicesaidhi/jabby@0.2.2"
 jecs = "ukendio/jecs@0.9.0"
+profilestore = "sekuriyo-lotus/profilestore@1.0.4"

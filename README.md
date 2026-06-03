@@ -44,8 +44,10 @@ damage every tick without melting the server or the wire, while the player can d
 **Headline: ~20× the naive ceiling, server-authoritative, at 85 FPS — with the GPU idle.**
 
 ## How (one technique per order of magnitude)
-- **Render** — pooled single `Part`s + `WorldRoot:BulkMoveTo` (not rigs). Drawing 10k is
-  free; the only cost is *applying* transforms, so we batch them.
+- **Render** — a recycled pool driven by one `WorldRoot:BulkMoveTo`/frame (drawing is free;
+  the only cost is *applying* transforms, so we batch them). The validated single-`Part` pool
+  proved the 10k ceiling; the playable build pools **zombie rigs** (anchored root + jointed
+  limbs, procedural walk) on the same driver for fidelity — same technique, richer mob.
 - **Nav** — a **flow field** (one multi-source Dijkstra flood/tick) → **O(1) next-hop per
   mob** instead of per-mob A\*; Y interpolated along the graph edge → **no per-mob raycasts**,
   never sinks under the map.
@@ -59,25 +61,42 @@ damage every tick without melting the server or the wire, while the player can d
   disagrees with the hitboxes.
 
 ## It's a game, not a tech demo
-Hybrid spawns with **elite/boss spikes** → **XP & leveling** → a **3-card upgrade picker**
-(global stats + crit + per-weapon upgrades, each tagged) → **multiple weapons** as orbiting
-pets (piercing bubbles + 3-shot scatter, 3 slots, earned via "New Weapon" drops) → an
-**ultimate** (bubble nova) with a cooldown UI → **player HP, contact damage, death →
-game-over → restart**. A full survive-and-build run loop.
+A **main menu** gates the run, then a **wave spawner** ramps hordes with **elite/boss
+spikes** and a **UFO flying enemy** (ignores pathfinding — hovers and attacks at range with
+laser bolts, or a slow player-tracking beam as an elite/boss). Kills feed **XP & leveling**
+→ a **3-card upgrade picker** tagged by category (*player stat / pet stat / perk*). You build
+a loadout of up to **3 of 5 pet weapons** — projectile (piercing bubbles, 3-shot scatter),
+**aura**, **melee cone**, **stone-drop** — each a real archetype with a **signature skill on
+Q / E / R** (Nova, Barrage, Quake, Avalanche, Roar). **Bosses always drop a pet** + a big XP
+orb + currency; **hearts** heal; a **Tix** meta-currency drops in three tiers and **persists
+across sessions via DataStore** (alongside lifetime best-stats). Round it out with **player
+HP, contact + ranged damage, knockback, hit-flash, fly-to-player pickup FX, and death →
+game-over → restart**. A full survive-and-build run loop, all server-authoritative.
+
+A single **pet registry** is the source of truth for every pet (base stats, perks, skill) —
+both the loadout/upgrade UI and the real combat math read the same data, so they never drift.
 
 ## Architecture (JECS ECS)
 - **Systems** auto-loaded per folder, registered via `scheduler.SYSTEM(fn, phase)`:
   - `horde` — one server batch: flow-field steer + spatial-hash separation + edge-Y, then
     position streaming (no per-mob raycasts/LOS)
-  - `combat` — pet auto-fire, formula-bubble simulation vs the hash, crit, contact damage,
-    death
-  - `exp` / `progression` — tiered EXP pickup & merge, XP/levels, the upgrade card system
-  - client `syncMobs` / `syncBubbles` / `syncPet` / `syncCards` — pure-presentation rendering
+  - `ufo` — flying-enemy brain: hover at range, laser bolts / player-tracking beam, own stream
+  - `combat` — pet auto-fire (4 weapon kinds) + skills, formula-bubble sim vs the hash, crit,
+    contact + ranged damage, death/rewards
+  - `exp` / `progression` — tiered EXP pickup & merge, XP/levels, the registry-driven cards
+  - `petdrops` / `healthdrops` / `tixdrops` — boss pet pickups, heart heals, Tix currency
+  - `profile` — DataStore persistence (Tix + lifetime best-stats); `players` — gated spawns
+  - client `syncMobs` (pooled zombie rigs) / `syncUFO` / `syncBubbles` / `syncPet` /
+    `syncCards` / `syncHealth` / `syncTix` / `syncPetDrops` / `weaponpanel` / `skillbar` /
+    `mainmenu` — pure-presentation rendering + UI
 - **Networking** via Blink (schema-generated, never hand-edited) — formula projectiles +
-  position deltas + periodic snapshots.
+  position deltas + periodic snapshots + compact event channels for drops/skills/currency.
+- **Single source of truth:** `std/petRegistry.luau` (pet data) feeds both UI and combat.
 
 ## Honest limits
-- 3,000 is **verified smooth**; raw 10,000 is the **last mile** (client render LOD/throttle +
-  dense-slot i8 replication — optimization, not redesign).
+- 3,000 is **verified smooth** with the single-`Part` pool; raw 10,000 is the **last mile**
+  (client render LOD/throttle + dense-slot i8 replication — optimization, not redesign).
+- The playable build trades some of that headroom for **zombie rigs** (richer visuals, ~7×
+  the parts); the single-`Part` renderer is a drop-in swap when raw scale matters.
 - Numbers are Studio play-test; a shipped client runs higher.
 - Single-player verified; co-op is designed in (per-player state) but not load-tested.

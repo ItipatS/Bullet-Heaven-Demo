@@ -32,11 +32,13 @@ local Mob       = cts.Mob
 local PathNode  = cts.PathNode
 local Character  = cts.Character
 local Player     = cts.Player
+local Knock      = cts.Knock
 
 local Waypoints = pathData[1]
 
 -- ── Tunables ──────────────────────────────────────────────────────────────────
 local MOVE_TICK     = 1 / 20
+local KNOCK_DECAY   = 6       -- knockback impulse decay rate
 local SEP_RADIUS    = 3
 local SEP_R2        = SEP_RADIUS * SEP_RADIUS
 local SEP_GAIN      = 2.0     -- separation weight vs steer (higher → spreads more)
@@ -147,6 +149,17 @@ local function moveStep(dt: number)
         if vm > 1e-4 then
             nx = pos.X + (vx / vm) * speed * dt
             nz = pos.Z + (vz / vm) * speed * dt
+        end
+
+        -- knockback (impulse from a hit, decays) — applied on top of steering. Value-update
+        -- only (never add/remove mid-query): decays to zero and stays (combat adds it).
+        local k = world:get(e, Knock)
+        if k and (k.X ~= 0 or k.Z ~= 0) then
+            nx += k.X * dt
+            nz += k.Z * dt
+            local nk = k * math.exp(-KNOCK_DECAY * dt)
+            if nk.X * nk.X + nk.Z * nk.Z < 1 then nk = Vector3.zero end
+            world:set(e, Knock, nk)
         end
 
         -- Y from the graph edge F→T (on the walkable surface; per-mob progress conforms to the

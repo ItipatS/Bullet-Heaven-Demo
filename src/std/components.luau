@@ -61,7 +61,10 @@ local components: {
 
 	-- Combat
 	Health: Entity<{ hp: number, max: number }>,
-	Elite: Entity, -- tag: tougher monster that drops a reward on death
+	Elite: Entity, -- tag: tougher monster that drops a reward (upgrade card) on death
+	Boss: Entity,  -- tag: rare big monster that drops a PET pickup on death
+	Flying: Entity, -- tag: UFO — ignores pathfinding, hovers + attacks at range (ufo.luau)
+	Knock: Entity<Vector3>, -- current knockback velocity (decays); horde applies it
 } = {
 		Character = world:component(),
 		Mob = world:component(),
@@ -99,6 +102,9 @@ local components: {
 
 		Health = world:component(),
 		Elite = world:component(),
+		Boss = world:component(),
+		Flying = world:component(),
+		Knock = world:component(),
 	}
 
 for name, component in components :: {[string]: jecs.Entity} do 

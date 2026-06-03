@@ -5,9 +5,17 @@
 --!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players           = game:GetService("Players")
 
-local std   = ReplicatedStorage.std
-local blink = require(std:WaitForChild("ClientNet"))
+local std    = ReplicatedStorage.std
+local blink  = require(std:WaitForChild("ClientNet"))
+local dropFx = require(std:WaitForChild("dropFx"))
+
+local player = Players.LocalPlayer
+local function hrp(): BasePart?
+    local c = player.Character
+    return c and c:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
 
 local folder = Instance.new("Folder")
 folder.Name = "ExpOrbs"
@@ -18,6 +26,7 @@ local TIER = {
     [2] = { color = Color3.fromRGB(90, 170, 255),  size = 1.7 },
     [3] = { color = Color3.fromRGB(255, 170, 70),  size = 2.5 },
     [4] = { color = Color3.fromRGB(205, 120, 255), size = 3.4 },
+    [5] = { color = Color3.fromRGB(255, 225, 90),  size = 5.0 }, -- boss big gold orb (wave×5)
 }
 
 local function makePart(): BasePart
@@ -48,11 +57,12 @@ blink.SpawnExp.On(function(batch)
 end)
 
 blink.RemoveExp.On(function(ids)
+    local target = hrp()
     for _, id in ids do
         local p = orbs[id]
         if p then
-            p:Destroy()
             orbs[id] = nil
+            dropFx.collect(p, target) -- fly to the player, then despawn
         end
     end
 end)

@@ -16,6 +16,7 @@ local scheduler   = require(std.scheduler)
 local phases      = require(std.phases)
 local SpatialHash = require(std.spatialhash)
 local Progress    = require(script.Parent.progression)
+local PlayerState = require(std.playerState)
 
 -- ── Tunables ──────────────────────────────────────────────────────────────────
 local PICKUP_RADIUS = 7
@@ -29,9 +30,10 @@ local EXP_TICK      = 1 / 10
 local TIER_VALUE    = { 1, 5, 25, 125 }
 
 -- ── State ─────────────────────────────────────────────────────────────────────
-type Orb = { id: number, x: number, y: number, z: number, tier: number }
+type Orb = { id: number, x: number, y: number, z: number, tier: number, value: number }
 local orbs: { [number]: Orb } = {}
 local nextOrbId = 0
+local BIG_TIER = 5 -- boss orb: special gold visual, never merges (tier > MAX_TIER)
 
 local hash = SpatialHash.new(HASH_CELL)
 local out: { number } = {}
@@ -67,10 +69,20 @@ function M.drop(x: number, z: number, count: number)
         local ox = x + (math.random() * 3 - 1.5)
         local oz = z + (math.random() * 3 - 1.5)
         local oy = (groundY(ox, oz) or 0) + 1
-        local o: Orb = { id = nextOrbId, x = ox, y = oy, z = oz, tier = 1 }
+        local o: Orb = { id = nextOrbId, x = ox, y = oy, z = oz, tier = 1, value = TIER_VALUE[1] }
         orbs[nextOrbId] = o
         emitSpawn(o)
     end
+    flush()
+end
+
+-- one BIG orb carrying an explicit value (boss reward = wave×5). Gold visual (BIG_TIER), no merge.
+function M.dropBig(x: number, z: number, value: number)
+    nextOrbId += 1
+    local oy = (groundY(x, z) or 0) + 1.5
+    local o: Orb = { id = nextOrbId, x = x, y = oy, z = z, tier = BIG_TIER, value = value }
+    orbs[nextOrbId] = o
+    emitSpawn(o)
     flush()
 end
 
@@ -90,14 +102,16 @@ local function pickupStep()
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root then continue end
         local rp = (root :: BasePart).Position
+        local pr = PlayerState.get(plr).pickupRange
+        local pickupR2 = (PICKUP_RADIUS * pr) * (PICKUP_RADIUS * pr)
         local cnt = hash:queryInto(rp.X, rp.Y, rp.Z, out)
         for j = 1, cnt do
             local id = out[j]
             local o = orbs[id]
             if o then
                 local dx, dz = o.x - rp.X, o.z - rp.Z
-                if dx * dx + dz * dz <= PICKUP_R2 then -- XZ proximity (forgiving on height)
-                    xpByPlayer[plr] = (xpByPlayer[plr] or 0) + (TIER_VALUE[o.tier] or 1)
+                if dx * dx + dz * dz <= pickupR2 then -- XZ proximity (forgiving on height)
+                    xpByPlayer[plr] = (xpByPlayer[plr] or 0) + (o.value or TIER_VALUE[o.tier] or 1)
                     orbs[id] = nil
                     emitRemove(id)
                 end
@@ -142,20 +156,28 @@ local function mergeStep()
 
     -- PHASE 2: apply (mutate `orbs` now that iteration is done)
     for _, grp in groups do
-        local cx, cy, cz, n = 0, 0, 0, #grp.ids
+        local cx, cy, cz, sumv, n = 0, 0, 0, 0, #grp.ids
         for _, gid in grp.ids do
             local g = orbs[gid]
             if g then
-                cx += g.x; cy += g.y; cz += g.z
+                cx += g.x; cy += g.y; cz += g.z; sumv += g.value
                 orbs[gid] = nil
                 emitRemove(gid)
             end
         end
         nextOrbId += 1
-        local no: Orb = { id = nextOrbId, x = cx / n, y = cy / n, z = cz / n, tier = grp.tier + 1 }
+        local no: Orb = { id = nextOrbId, x = cx / n, y = cy / n, z = cz / n, tier = grp.tier + 1, value = sumv }
         orbs[no.id] = no
         emitSpawn(no)
     end
+end
+
+-- wipe all orbs (called on a run restart)
+function M.clearAll()
+    local ids = {}
+    for id in orbs do ids[#ids + 1] = id end
+    for _, id in ids do orbs[id] = nil end
+    if #ids > 0 then blink.RemoveExp.FireAll(ids) end
 end
 
 local acc = 0

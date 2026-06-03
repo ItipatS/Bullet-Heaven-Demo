@@ -1,18 +1,21 @@
 -- std/MobRenderPool.luau
--- Recycled anchored-part pool for the horde. One cheap part per visible mob; positions are
--- applied in BULK once per frame via WorldRoot:BulkMoveTo (Phase-0 proved: drawing 10k is
--- free, the only cost is applying transforms — so we batch them).
+-- Recycled anchored-RIG pool for the horde. One cheap zombie rig per visible mob. Each rig is
+-- ONE anchored root (PrimaryPart / HumanoidRootPart) with unanchored, jointed (Motor6D) limbs —
+-- so moving just the root in BULK via WorldRoot:BulkMoveTo drags the whole body (the joint
+-- solver carries the limbs). Phase-0 finding holds: drawing the parts is GPU-free; the cost is
+-- applying transforms, so we batch only the roots.
 --
 -- Usage:
---   local pool = MobRenderPool.new(template, folder)
---   pool:acquire(key, cf)        -- spawn (idempotent per key)
---   pool:setCFrame(key, cf)      -- queue this frame's transform (no instance write yet)
---   pool:flush()                 -- one BulkMoveTo for every active part
---   pool:release(key)            -- despawn → part recycled
---   pool:get(key)                -- current BasePart or nil
+--   local pool = MobRenderPool.new(templateModel, folder)  -- template Model with a PrimaryPart
+--   pool:acquire(key, cf, scale)  -- spawn (idempotent per key); scale>1 = bigger (elite/boss)
+--   pool:setCFrame(key, cf)       -- queue this frame's root transform (no instance write yet)
+--   pool:flush()                  -- one BulkMoveTo for every active root
+--   pool:release(key)             -- despawn → rig recycled
+--   pool:get(key)                 -- current root BasePart or nil
+--   pool:getModel(key)            -- current rig Model or nil
 --
--- Internally keeps four parallel structures so release is O(1) (swap-remove):
---   parts[i], cfs[i], keyAt[i]  and  index[key] = i
+-- Internally keeps parallel structures so release is O(1) (swap-remove):
+--   parts[i] (roots), cfs[i], keyAt[i], models[i]  and  index[key] = i
 --!optimize 2
 --!native
 --!strict
@@ -28,24 +31,26 @@ local sepOut: { number } = {}
 
 export type Pool = typeof(setmetatable(
     {} :: {
-        template: BasePart,
+        template: Model,
         folder: Instance,
-        parts: { BasePart },
+        parts: { BasePart }, -- the rig roots (PrimaryParts) — what BulkMoveTo moves
         cfs: { CFrame },
         keyAt: { any },
+        models: { Model },
         index: { [any]: number },
-        free: { BasePart },
+        free: { Model },
     },
     MobRenderPool
 ))
 
-function MobRenderPool.new(template: BasePart, folder: Instance): Pool
+function MobRenderPool.new(template: Model, folder: Instance): Pool
     return setmetatable({
         template = template,
         folder = folder,
         parts = {},
         cfs = {},
         keyAt = {},
+        models = {},
         index = {},
         free = {},
     }, MobRenderPool)
@@ -56,25 +61,31 @@ function MobRenderPool.get(self: Pool, key: any): BasePart?
     return if i then self.parts[i] else nil
 end
 
-local ELITE_COLOR = Color3.fromRGB(225, 85, 85)
+function MobRenderPool.getModel(self: Pool, key: any): Model?
+    local i = self.index[key]
+    return if i then self.models[i] else nil
+end
 
-function MobRenderPool.acquire(self: Pool, key: any, cf: CFrame, scale: number?): BasePart
+function MobRenderPool.acquire(self: Pool, key: any, cf: CFrame, scale: number?): Model
     local i = self.index[key]
     if i then
-        return self.parts[i]
+        return self.models[i]
     end
+    local model = table.remove(self.free) or self.template:Clone()
+    local prim = model.PrimaryPart :: BasePart
     local s = scale or 1
-    local part = table.remove(self.free) or self.template:Clone()
-    part.Size = self.template.Size * s
-    part.Color = if s > 1.5 then ELITE_COLOR else self.template.Color
-    part.CFrame = cf
-    part.Parent = self.folder
+    if model:GetScale() ~= s then
+        model:ScaleTo(s) -- elite/boss = bigger rig (joints scale too)
+    end
+    prim.CFrame = cf
+    model.Parent = self.folder
     local n = #self.parts + 1
-    self.parts[n] = part
+    self.parts[n] = prim
     self.cfs[n] = cf
     self.keyAt[n] = key
+    self.models[n] = model
     self.index[key] = n
-    return part
+    return model
 end
 
 function MobRenderPool.setCFrame(self: Pool, key: any, cf: CFrame)
@@ -89,29 +100,31 @@ function MobRenderPool.release(self: Pool, key: any)
     if not i then
         return
     end
-    local parts, cfs, keyAt, index = self.parts, self.cfs, self.keyAt, self.index
+    local parts, cfs, keyAt, models, index = self.parts, self.cfs, self.keyAt, self.models, self.index
     local n = #parts
-    local part = parts[i]
+    local model = models[i]
 
     -- swap the last entry into slot i, then truncate
     local lastKey = keyAt[n]
     parts[i] = parts[n]
     cfs[i] = cfs[n]
     keyAt[i] = lastKey
+    models[i] = models[n]
     index[lastKey] = i
 
     parts[n] = nil
     cfs[n] = nil
     keyAt[n] = nil
+    models[n] = nil
     index[key] = nil -- after, so the i==n self-removal lands correctly
 
-    part.Parent = nil
-    self.free[#self.free + 1] = part
+    model.Parent = nil
+    self.free[#self.free + 1] = model
 end
 
 -- Spread overlapping mobs apart in XZ (one relaxation step) so a horde piling on the player
--- doesn't draw 1000 parts on the same pixels — overdraw is what tanks FPS when stacked. Pure
--- render-side nudge of the queued CFrames; call before flush().
+-- doesn't draw 1000 rigs on the same pixels — overdraw is what tanks FPS when stacked. Pure
+-- render-side nudge of the queued root CFrames; call before flush().
 --   yBand   — only push apart mobs within this height of each other, so a pile at a wedge/cliff
 --             doesn't fling top-level mobs against base-level ones (the "explode" bug).
 --   maxPush — clamp the per-frame displacement so an ultra-dense chokepoint can't blow up.

@@ -11,6 +11,12 @@ local Character = cts.Character
 
 local conn = {}
 
+-- Death is server-authoritative and FINAL until Restart (combat.luau hooks Humanoid.Died and
+-- calls LoadCharacter on restart). So Roblox must NOT auto-respawn — otherwise a fall/void death
+-- would silently reset the character out from under the GameOver screen. We load the first body
+-- ourselves below.
+Players.CharacterAutoLoads = false
+
 local function playersAdded(player: Player)
 	local e = ref(player.UserId)
 	world:set(e, Player, player)
@@ -21,6 +27,11 @@ local function playersAdded(player: Player)
 		end
 		world:set(e, Character, rig)
 	end)
+	if not player.Character then
+		-- LoadCharacter YIELDS; this runs as a scheduler system (shared-state generic-for
+		-- dispatch = C-call boundary), so it must not yield here → spawn it in a fresh thread.
+		task.spawn(function() player:LoadCharacterAsync() end)
+	end
 end
 
 local function playersRemoved(player: Player) 

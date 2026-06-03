@@ -61,7 +61,7 @@ event UpdateTransformFull {
 event Spawn {
     From: Server,
     Type: Reliable,
-    Call: SingleSync,
+    Call: ManySync,
     Poll: false,
     Data: MobSpawn[]
 }
@@ -113,8 +113,8 @@ struct ExpSpawn {
     tier: u8,
 }
 
--- One level-up choice. `id` is the offered index (1..3). `kind` 0=global player stat, 1=weapon
--- upgrade; `weapon` names which weapon (for the card's icon/tag), "" for global.
+-- One level-up choice. `id` is the offered index (1..3). `kind`: 0=player stat, 1=pet stat,
+-- 2=pet perk, 3=new pet; `weapon` names the pet (for the card's icon/tag), "" for player stats.
 struct Card {
     id: u8,
     title: string,
@@ -137,11 +137,12 @@ struct GameOverMsg {
     level: u16,
 }
 
--- Zombies that died this frame (client releases their pooled part).
+-- Mobs that died this frame (client releases their visual). ManySync: zombies (syncMobs) and
+-- UFOs (syncUFO) both listen and release whichever ids are theirs.
 event Death {
     From: Server,
     Type: Reliable,
-    Call: SingleSync,
+    Call: ManySync,
     Poll: false,
     Data: u32[]
 }
@@ -152,6 +153,17 @@ event FireBubble {
     Call: SingleSync,
     Poll: false,
     Data: BubbleFire[]
+}
+
+-- Bubbles the server retired EARLY (pierce used up) before their `life`. Client despawns them so
+-- pierce reads correctly (a 3-pierce bolt vanishes after 3 hits, not after `life`). Unreliable —
+-- a miss just lets it live out its life, no harm.
+event RemoveBubble {
+    From: Server,
+    Type: Unreliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
 }
 
 event SpawnExp {
@@ -226,13 +238,57 @@ event Restart {
     Data: u8
 }
 
--- Server → one player: the player's current weapon ids (for rendering one pet per weapon).
+-- Server → one player: the player's EQUIPPED weapon ids (one pet per weapon). ManySync so
+-- both syncPet (render) and the weapon panel (highlight) can listen.
 event Weapons {
+    From: Server,
+    Type: Reliable,
+    Call: ManySync,
+    Poll: false,
+    Data: string[]
+}
+
+-- Server → one player: every weapon id the player OWNS (equipped + benched) for the panel.
+event Unlocked {
     From: Server,
     Type: Reliable,
     Call: SingleSync,
     Poll: false,
     Data: string[]
+}
+
+-- Client → server: the desired equipped set (≤3, must be owned).
+event SwitchWeapons {
+    From: Client,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: string[]
+}
+
+-- One-shot AoE visual. kind: 1=aura pulse, 2=melee swing (uses dir), 3=stone drop.
+struct EffectMsg {
+    kind: u8,
+    pos: vector<f32>,
+    radius: f32,
+    dir: vector<f32>,
+}
+
+event Effect {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: EffectMsg[]
+}
+
+-- Server → all: a new wave started (client shows a banner).
+event WaveStart {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u16
 }
 
 -- Server → one player: progression HUD update.
@@ -242,4 +298,171 @@ event Stats {
     Call: SingleSync,
     Poll: false,
     Data: StatsMsg
+}
+
+-- Server → all: mob ids that took damage this tick. Cosmetic hit-flash; unreliable (drops ok).
+-- ManySync: zombies (syncMobs) AND UFOs (syncUFO) both flash whichever ids are theirs.
+event Hit {
+    From: Server,
+    Type: Unreliable,
+    Call: ManySync,
+    Poll: false,
+    Data: u32[]
+}
+
+-- Server → one player: a short banner message (e.g. "New pet: Bear!").
+event Toast {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: string
+}
+
+-- A pet pickup dropped by a slain boss. Static; Y already resolved to the floor. `pet` is the
+-- registry id (axolotl/fox/...) so the client knows which animal model to float + spin.
+struct PetDrop {
+    id: u32,
+    pos: vector<f32>,
+    pet: string,
+}
+
+event PetDropSpawn {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: PetDrop[]
+}
+
+-- Pet pickups that were collected/removed (client despawns their model).
+event PetDropRemove {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
+}
+
+-- A health (Heart) pickup dropped by a slain mob. Static; Y already resolved to the floor.
+struct HealthDrop {
+    id: u32,
+    pos: vector<f32>,
+}
+
+event HealthSpawn {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: HealthDrop[]
+}
+
+-- Health pickups that were collected/removed (client despawns their model).
+event HealthRemove {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
+}
+
+-- A Tix currency pickup dropped by a slain mob. `kind` is the Assets model name
+-- ("Tix" / "PileofTix" / "StackofTix") = the visual tier. Static; Y resolved to the floor.
+struct TixDrop {
+    id: u32,
+    pos: vector<f32>,
+    amount: u32,    -- tix value; client picks the model (≤5 Tix, ≤20 PileofTix, else StackofTix)
+}
+
+event TixSpawn {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: TixDrop[]
+}
+
+-- Tix pickups collected/removed (client despawns their model).
+event TixRemove {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
+}
+
+-- Server → one player: their current Tix balance (meta currency, survives a run restart).
+event TixCount {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32
+}
+
+-- Server → one player: their PERSISTED profile (DataStore). tix + lifetime/best stats. Sent on
+-- join (after load) and after a run ends (best stats may have changed).
+struct ProfileMsg {
+    tix: u32,
+    bestWave: u16,
+    bestLevel: u16,
+    bestTime: u32,    -- best survival, seconds
+    totalKills: u32,
+    runs: u32,
+}
+
+event Profile {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: ProfileMsg
+}
+
+-- ── UFO flying enemy (ufo.luau) ──────────────────────────────────────────────────
+-- UFOs spawn via the shared Spawn event (type "UFO", size = scale). They move via their own
+-- stream (UfoMove) since they ignore the path/horde, and attack at range.
+
+-- Server → all: UFO positions (few of them, so plain full f32 each tick — no delta needed).
+struct UfoPos {
+    id: u32,
+    pos: vector<f32>,
+}
+event UfoMove {
+    From: Server,
+    Type: Unreliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: UfoPos[]
+}
+
+-- Server → all: a UFO laser bolt (normal attack). Formula motion pos = origin + vel*(now-t0),
+-- computed both ends; server sims it vs players for authoritative damage. Client just renders.
+struct UfoBolt {
+    origin: vector<f32>,
+    vel: vector<f32>,
+    t0: f64,
+    life: f32,
+}
+event UfoFire {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: UfoBolt[]
+}
+
+-- Server → all: continuous beams (elite/boss UFOs). One entry per active beam this tick: the
+-- UFO id + the beam's current endpoint (lags the player). No entry → that UFO's beam is off.
+struct UfoBeamMsg {
+    id: u32,
+    target: vector<f32>,
+}
+event UfoBeam {
+    From: Server,
+    Type: Unreliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: UfoBeamMsg[]
 }

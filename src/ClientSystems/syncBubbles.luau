@@ -54,6 +54,18 @@ blink.FireBubble.On(function(batch)
     end
 end)
 
+-- server retired these early (pierce used up) → despawn now so pierce looks finite
+blink.RemoveBubble.On(function(ids)
+    for _, id in ids do
+        local b = active[id]
+        if b then
+            b.part.Parent = nil
+            free[#free + 1] = b.part
+            active[id] = nil
+        end
+    end
+end)
+
 local function step()
     local now = workspace:GetServerTimeNow()
     for id, b in active do

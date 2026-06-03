@@ -2,7 +2,9 @@
   "name": "demo",
   "tree": {
     "$className": "DataModel",
+    "$ignoreUnknownInstances": true,
     "ReplicatedStorage": {
+      "$ignoreUnknownInstances": true,
       "Packages": {
         "$path": "Packages"
       },
@@ -17,13 +19,13 @@
       }
     },
     "ServerScriptService": {
+      "$ignoreUnknownInstances": true,
       "$path": "src/ServerScriptService"
     },
-    "StarterGui": {
-      "$path": "src/StarterGui"
-    },
     "StarterPlayer": {
+      "$ignoreUnknownInstances": true,
       "StarterPlayerScripts": {
+        "$ignoreUnknownInstances": true,
         "$path": "src/StarterPlayer/StarterPlayerScripts"
       }
     }
