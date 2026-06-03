@@ -1,0 +1,16 @@
+# Project place file
+/example.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+/*.rbxl
+
+# Generated
+/sourcemap.json
+
+# Wally packages — restore with `wally install` (versions pinned in wally.lock)
+/Packages/
+
+# Local AI/dev handoff notes (machine-specific paths)
+/CLAUDE.md

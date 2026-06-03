@@ -1,0 +1,245 @@
+option ClientOutput = "src/std/ClientNet.luau"
+option ServerOutput = "src/ServerScriptService/ServerNet.luau"
+
+map state = { [string]: string }
+
+struct Transform {
+    id: u32,
+    dp: vector<f16>,
+}
+
+struct TransformFull {
+    id: u32,
+    dp: vector<f32>,
+}
+
+struct MobState {
+    id: u32,
+    state: state,
+}
+
+struct MobSpawn {
+    id: u32,
+    pos: vector<f64>,
+    size: f32,    -- visual scale (1 = normal slime, larger = elite)
+    type: string,
+}
+
+struct Path {
+    id: u32,
+    from : u32,
+    to: u32,
+    speed: f32,
+    startTime: f64,  -- absolute GetServerTimeNow(); MUST be f64 (f32 ULP ~128s at 1.78e9)
+}
+
+-- Direct-chase intent: zombie homes on `target` (a player's character) at `speed`.
+-- Sent once on entering chase mode; client + server both steer toward the live,
+-- already-replicated target position each frame (no per-frame streaming).
+struct Chase {
+    id: u32,
+    target: Instance,
+    speed: f32,
+}
+
+event UpdateTransformDelta {
+    From: Server,
+    Type: Unreliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: Transform[]
+}
+
+event UpdateTransformFull {
+    From: Server,
+    Type: Reliable,    -- Must arrive to correct drift
+    Call: SingleSync, 
+    Poll: false,
+    Data: TransformFull[]
+}
+
+event Spawn {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: MobSpawn[]
+}
+
+event UpdateMobState {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: MobState[]
+}
+
+event UpdateMobPath {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: Path[]
+}
+
+event UpdateMobChase {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: Chase[]
+}
+
+-- ── Combat / progression (Phase 2) ──────────────────────────────────────────────
+
+-- A bubble projectile. Formula motion: pos = origin + velocity*(GetServerTimeNow()-t0),
+-- computed on BOTH ends (no per-bubble streaming). Server sims it vs the spatial hash for
+-- authoritative damage; client just renders it for `life` seconds.
+struct BubbleFire {
+    id: u32,
+    origin: vector<f32>,
+    velocity: vector<f32>,
+    t0: f64,
+    life: f32,
+    color: vector<f32>,  -- r,g,b (0..1)
+    size: f32,           -- visual diameter
+}
+
+-- A dropped EXP orb. Static; Y already resolved to the floor by the server. `tier` drives
+-- the client visual (1=small green, 2=blue, 3=orange, 4=purple); the server derives value.
+struct ExpSpawn {
+    id: u32,
+    pos: vector<f32>,
+    tier: u8,
+}
+
+-- One level-up choice. `id` is the offered index (1..3). `kind` 0=global player stat, 1=weapon
+-- upgrade; `weapon` names which weapon (for the card's icon/tag), "" for global.
+struct Card {
+    id: u8,
+    title: string,
+    desc: string,
+    kind: u8,
+    weapon: string,
+}
+
+-- Player's progression + survival for the HUD.
+struct StatsMsg {
+    level: u16,
+    xp: u32,
+    xpNext: u32,
+    hp: u16,
+    maxHp: u16,
+}
+
+struct GameOverMsg {
+    time: f32,    -- seconds survived
+    level: u16,
+}
+
+-- Zombies that died this frame (client releases their pooled part).
+event Death {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
+}
+
+event FireBubble {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: BubbleFire[]
+}
+
+event SpawnExp {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: ExpSpawn[]
+}
+
+-- EXP orbs that were collected/removed (client despawns their visual).
+event RemoveExp {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u32[]
+}
+
+-- Server → one player: present 3 upgrade cards on level-up.
+event LevelUp {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: Card[]
+}
+
+-- Client → server: the player picked card #index (1..3) of the current offer.
+event ChooseCard {
+    From: Client,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u8
+}
+
+-- Client → server: the player's current aim direction (unit, full 3D). The pet fires this
+-- way on its cooldown. Unreliable: latest aim wins, drops are fine.
+event Aim {
+    From: Client,
+    Type: Unreliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: vector<f32>
+}
+
+-- Client → server: activate a pet skill by id (server validates cooldown).
+event UseSkill {
+    From: Client,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u8
+}
+
+-- Server → one player: the run ended (HP hit 0).
+event GameOver {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: GameOverMsg
+}
+
+-- Client → server: start a fresh run after dying.
+event Restart {
+    From: Client,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u8
+}
+
+-- Server → one player: the player's current weapon ids (for rendering one pet per weapon).
+event Weapons {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: string[]
+}
+
+-- Server → one player: progression HUD update.
+event Stats {
+    From: Server,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: StatsMsg
+}

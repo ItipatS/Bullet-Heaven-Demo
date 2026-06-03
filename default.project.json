@@ -1,0 +1,31 @@
+{
+  "name": "demo",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "Packages": {
+        "$path": "Packages"
+      },
+      "ecs": {
+        "$path": "src/jecs.luau"
+      },
+      "std": {
+        "$path": "src/std"
+      },
+      "ClientSystems": {
+        "$path": "src/ClientSystems"
+      }
+    },
+    "ServerScriptService": {
+      "$path": "src/ServerScriptService"
+    },
+    "StarterGui": {
+      "$path": "src/StarterGui"
+    },
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "$path": "src/StarterPlayer/StarterPlayerScripts"
+      }
+    }
+  }
+}
