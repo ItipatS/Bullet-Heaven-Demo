@@ -3,13 +3,16 @@
 -- tunables, and the mobile control scheme. Lives in ReplicatedStorage.std so the SERVER
 -- (SpawnMob/combat/ufo) and the CLIENT (aimstick/syncPet) read the exact same values.
 --
--- Ship with Debug.* all off. Flip them for stress-testing.
+-- NOTE: the PUBLIC SHOWCASE build intentionally ships these Debug flags ON (not leftover debug) so
+-- anyone sees ~1000 server-authoritative mobs + a steady FPS overlay the moment they join — the whole
+-- point is "1000 mobs doesn't make the engine die." Flip them OFF for a normal ramped, losable game.
 --!strict
 
 local Config = {}
 
--- ── Debug / stress-test toggles ─────────────────────────────────────────────────
--- These change gameplay — leave them OFF for a real build.
+-- ── Debug / showcase toggles ────────────────────────────────────────────────────
+-- These change gameplay. ON (current) = the public showcase: instant scale + invincible so a viewer
+-- can stand in the horde and watch the FPS hold. OFF = a normal ramped, losable run.
 Config.Debug = {
     -- Spawn STRESS_COUNT mobs on the very first wave (fast fill) instead of the normal
     -- ramp, so you can stress the renderer/perf immediately. Later waves spawn normally.

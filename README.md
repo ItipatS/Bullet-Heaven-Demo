@@ -177,8 +177,10 @@ runs.
 2. Regenerate the network layer if `Net.blink` changed: `blink Net.blink` →
    `src/std/ClientNet.luau` + `src/ServerScriptService/ServerNet.luau` (generated; don't hand-edit).
 3. Sync to Studio: `rojo serve` and connect the Rojo Studio plugin.
-4. Press Play. Stress/debug toggles live in **`src/std/config.luau`** (`STRESS_TEST`,
-   `INVINCIBLE`, `SHOW_FPS`) — ship with all off.
+4. Press Play. Showcase/debug toggles live in **`src/std/config.luau`**. The public build
+   intentionally ships them **on** — `STRESS_TEST` (≈1000 mobs on wave 1), `INVINCIBLE` (stand in
+   the horde and watch the FPS hold), `SHOW_FPS` (the proof overlay) — so the scale reads instantly.
+   Flip them **off** for a normal ramped, losable run.
 
 ## Honest limits
 
