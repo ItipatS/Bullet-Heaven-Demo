@@ -1,149 +1,201 @@
-# Stats: where they live, how they're registered, computed, and upgraded
+# Stats & combat data flow: store → register → apply → resolve → consume
 
-This maps the whole stat pipeline — **store → register → apply (upgrade) → compute (call)** — for
-both the **player** and the **pets**. Three files do almost all of it:
+This maps the whole stat/combat pipeline. The design rule the codebase holds everywhere:
+
+> **Apply in one place → resolve into a derived ECS component → read that component.**
+> Nothing re-derives "is this active / what's the effective value" at the call site, and content
+> grows by *adding a row or a field*, never by extending a branch.
+
+That single discipline is what keeps a system with player stats, passive items, per-pet weapon
+upgrades, gear defense, and timed buffs — all interacting — readable and extensible.
 
 | File | Role |
 |---|---|
-| `src/std/petRegistry.luau` | **Single source of truth** for pets: base stats, perks, skill meta. Pure data, shared client+server. |
-| `src/std/playerState.luau` | **Live per-player state**: global stats + the player's actual weapon instances. The "save game" of a run. |
-| `src/ServerScriptService/systems/progression.luau` | **Registers & offers upgrades** (cards), applies the chosen one. |
-| `src/ServerScriptService/systems/combat.luau` | **Reads** the stats every tick to do damage / fire / move. |
+| `std/petRegistry.luau` | **Single source of truth** for pets: base stats, upgrade trees, ultimate meta. Pure data, shared client+server. |
+| `std/itemRegistry.luau` | **Single source of truth** for passive items: each item's `apply(state, level)`. |
+| `std/playerState.luau` | **Live per-player run state**: global stats, passive-item multipliers, gear defense, and the player's actual weapon instances. The "save game" of a run. |
+| `std/statuses.luau` | **Mob status resolver**: applies `Slow`, ticks expiry, folds into the derived `SpeedMul`. |
+| `std/playerBuffs.luau` | **Player modifier resolver**: folds gear + items + timed buffs into the derived `PlayerMods` component. |
+| `systems/progression.luau` | **Registers & offers** upgrades (cards), applies the chosen one. |
+| `systems/combat.luau` | **Consumes** the resolved components every tick to fire / damage. |
+| `systems/profile.luau` | **Persists** the meta layer (DataStore): Tix, owned collection, chosen main, best-stats. |
 
 ---
 
-## 1. Two layers of stats
+## 1. The layers of state
 
-**Player-global stats** — one set per player, affect everything:
-`level, xp, xpNext, hp, maxHp, dead, runStart, damageMult, critChance, critDamage,
-hpRegen, pickupRange, walkSpeed, tix`.
-Stored in the `State` table in `playerState.luau`.
+**Player-global** (one set per player, affects everything) — in the `State` table:
+`level, xp, xpNext, hp, maxHp, dead, playing, runStart, damageMult, critChance, critDamage,
+hpRegen, pickupRange, walkSpeed, haste, expMult, tixDropRate, tix`.
 
-**Pet (weapon) stats** — one `Weapon` instance per owned pet, affect only that pet:
-`id, name, kind, fireCd, dmg, pierce, radius, speed, life, shots, spread, split, knock, color, cd`.
-Stored in `State.weapons` (≤3 equipped) and `State.bench` (owned-but-unequipped — keeps upgrades
-through a swap).
+**Passive items** (run-only buffs) — `items` is the owned `id → level`; the derived multipliers
+`itemDmg, itemAtkSize, itemKnock, itemPickup, itemHaste, itemCrit, itemCritDmg, itemSkillCd` are
+**recomputed from `items`** on every change (`recomputeItems`: reset to identity, then re-apply
+each owned item via `itemRegistry`).
 
-So: `State` holds player stats **and** owns the pet instances.
+**Gear defense** (summed from the run's pets) — `armor, reflect, regenBonus`, recomputed by
+`recomputeDefense` whenever the loadout or a weapon level changes.
+
+**Pet (weapon) instances** — one `Weapon` per pet in the run, affecting only that pet:
+`id, name, kind, fireCd, dmg, pierce, radius, speed, life, shots, spread, split, knock, color, cd,
+level, maxLevel` + behavior flags the upgrade trees toggle (`aoeRadius, splitPierce, skillBubbles,
+skillRepeat, boomerang, chain, dot, slowFactor, armor, reflect, regenBonus`). Stored in
+`State.weapons` (≤ `MAX_WEAPONS = 10`).
+
+**Timed effects** (live on **ECS components**, not the State table) — mob `Slow {factor, untilT}`
+and player `Buffs {[kind] = {mag, untilT}}`. These are the inputs to the resolver stage (§4).
+
+> The split is deliberate: `State` owns **resources & the run loadout** (hp, weapons, owned/squad,
+> tix). Everything that is a **modifier** ends up resolved onto an ECS component that combat reads.
 
 ---
 
 ## 2. STORE — where the numbers physically are
 
 ```
-PlayerState.states[player] = State {           -- one per player (playerState.luau)
-  damageMult = 1.0, critChance = 0.05, ...      -- player-global stats
-  hpRegen = 0, pickupRange = 1, walkSpeed = 16,
-  tix = 0,                                       -- META currency (see §6)
-  weapons = {                                    -- equipped pet INSTANCES
-    Weapon{ id="axolotl", dmg=10, pierce=3, ... },
+PlayerState.states[player] = State {            -- one per player (playerState.luau)
+  damageMult = 1.0, critChance = 0.05, ...       -- player-global stats
+  hpRegen = 0, walkSpeed = 16, haste = 1, tix = 0,
+  items = { spinach = 2, clover = 1 },           -- owned items (id → level)
+  itemDmg = 1.3, itemCrit = 0.05, ...            -- DERIVED from items (recomputeItems)
+  armor = 0.15, reflect = 0.2, regenBonus = 1,   -- DERIVED from gear (recomputeDefense)
+  owned = { axolotl = true, ... },               -- the persisted COLLECTION
+  squad = { "turtle" },                          -- menu loadout; [1] = your MAIN
+  weapons = {                                     -- the RUN's pet INSTANCES (built from squad + grown in-run)
+    Weapon{ id="turtle", kind="orbit", dmg=8, ... },
     ...
   },
-  bench = { mole = Weapon{...}, ... },           -- unequipped, upgrades preserved
 }
 ```
 
-A **pet instance** is created by `Registry.make(id)` (called via `PlayerState.makeWeapon`):
-it `table.clone`s the registry's `base` stats and stamps `id/name/kind/cd`. From that moment the
-instance is **independent** of the registry — upgrades mutate the *instance*, never the registry,
-so a fresh run (`makeWeapon` again) is always clean.
+A **pet instance** is `Registry.make(id)` → `table.clone`s the registry `base` and stamps
+`id/name/kind`. From that moment it's **independent** of the registry — upgrades mutate the
+*instance*, never the template — so a fresh run is always clean. *Registry = template;
+State.weapons = the live, upgraded copies.*
 
-> Registry = the *template*. State.weapons = the *live, upgraded copies*.
+The **timed-effect** state lives on the player/mob **entity** (players are ECS entities via
+`ref(UserId)`): `world:set(e, Buffs, …)` / `world:set(mobE, Slow, …)`.
 
 ---
 
-## 3. REGISTER — where upgrades are declared
+## 3. REGISTER — where upgrades & content are declared
 
-Two pools, by scope:
+- **Player-global cards** → `progression.luau` `GLOBAL` table: `{ title, desc, apply(s) }` that
+  mutates `State` (`Power` → `s.damageMult += …`, `Regeneration` → `s.hpRegen += …`, etc.).
+- **Pet upgrades** → on the pet in `petRegistry.luau` as a level tree: each level applies a fixed
+  behavioral upgrade to a *weapon* (`+dmg`, `pierce += 1`, `+5% armor`, `+1 shell`, …).
+- **Passive items** → in `itemRegistry.luau`: each item's `apply(state, level)` scales an `item*`
+  multiplier (Spinach → `itemDmg *= …`, Clover → `itemCrit += …`, Soda → `itemSkillCd *= 1.25`, …).
 
-**Player-global upgrades** → `progression.luau` `GLOBAL` table. Each entry is
-`{ title, desc, apply = function(s) ... end }` that mutates the `State`:
+Same source of truth means the **panel UI and the real combat math read identical numbers** — no
+drift, ever.
+
+---
+
+## 4. APPLY — the round trips that change state
+
+**Cards (level-up + boss/elite packs).** Kill → EXP orb → pickup → `Progress.addXp` → on level-up,
+`rollCards` builds an `Offer { source, cards }` from `GLOBAL` + the run pets' next upgrade + item
+cards; boss/elite deaths drop a **card pack** (3–5) you walk over. The client shows them; the
+chosen card's `apply` closure runs against `State`. (A pet card's closure captures its weapon slot,
+so it always edits the currently-equipped instance.)
+
+**The economy / loadout.** You own a **collection** (`owned`) and pick **one MAIN** at the menu
+(`setMain` → `squad = {id}`). A run *starts* as just the main and **grows in-run**:
+- level-up **new-weapon cards**, restricted to **owned** pets not already in the run → `addToRun`;
+- **boss/elite pet drops** → pickup = `ownPet` (unlock) + `addToRun` (join this run).
+
+New pets enter the collection via **boss** (`dropBoss`, guaranteed one you don't own), **elite**
+(`maybeDropElite`, ~20%), or the **Tix shop** (`BuyPet`, handled in `profile.luau` which owns the
+balance). Items are gained/leveled via cards (`addItem` → `recomputeItems`).
+
+Every loadout/upgrade path ends by calling `recomputeItems` / `recomputeDefense` so the derived
+State multipliers stay correct — those are the inputs the resolver reads next.
+
+---
+
+## 5. RESOLVE — the stage that makes it clean *(the core idea)*
+
+Two resolver systems run each tick in the **AIStateMachine** phase — *before* movement (horde) and
+combat read anything — and write **derived ECS components**:
+
+**Mobs — `std/statuses.luau`.** Combat applies a slow via `Statuses.slow(mobE, factor, untilT)`
+(never `world:set(Slow)` directly). `Statuses.tick` expires finished `Slow`s and folds the active
+one into a derived **`SpeedMul`** scalar. The horde movement loop reads **only** `SpeedMul` — it
+has no idea what a "slow" is; it just multiplies. (This also fixed a real bug: movement used to
+reference an unimported `Slow`, so the debuff was a silent no-op.)
+
+**Players — `std/playerBuffs.luau`.** `playerBuffs.tick` folds, into one derived **`PlayerMods`**
+component:
+- passive **gear defense** (`armor/reflect/regenBonus` + the `hpRegen` stat),
+- the **offensive** card-stats × item buffs (`damageMult·itemDmg`, `crit`, `atkSize`, `knock`,
+  `haste`, `skillCd`),
+- any active **timed buffs** (`Buffs`), aggregated **data-driven** via
+  `BUFF_KIND[kind] = {field, op}` (`op ∈ set | add | mul`).
+
 ```lua
-{ title = "Power",       apply = function(s) s.damageMult += 0.15 end },
-{ title = "Vitality",    apply = function(s) s.maxHp += 25; s.hp = min(s.maxHp, s.hp+25) end },
-{ title = "Regeneration",apply = function(s) s.hpRegen += 1 end },
-{ title = "Magnetism",   apply = function(s) s.pickupRange += 0.25 end },
-{ title = "Fleet Foot",  apply = function(s) s.walkSpeed += 1 end },
--- + Precision, Brutality, Haste
+PlayerMods = { invuln, armor, reflect, regen, walkSpeed,           -- defense / movement
+               damage, crit, critDmg, atkSize, knock, haste, skillCd }  -- offense / firing
 ```
 
-**Pet upgrades** → declared **on the pet** in `petRegistry.luau` as `perks`, each
-`{ id, title, desc, kind = "stat"|"perk", apply = function(w) ... end }` that mutates a *weapon*:
-```lua
-axolotl.perks = {
-  { title="Sharpen",    kind="stat", apply=function(w) w.dmg += 5 end },
-  { title="Pierce",     kind="perk", apply=function(w) w.pierce += 1 end },
-  { title="Split Shot", kind="perk", apply=function(w) w.split += 1 end },
-  ...
-}
-```
-`kind` only drives the card's category label (pet-stat vs perk). Same source of truth means the
-**panel UI and the real combat math read the identical numbers** — no drift.
+So a timed buff is applied once (`PlayerBuffs.apply(plr, "invuln", 0, now+2.5)` — turtle Shell
+Nova), and *every* consumer just reads the resolved field. (jecs detail: the resolvers defer
+structural `add`/`remove` out of their query loop, per the library's iteration rule.)
 
 ---
 
-## 4. APPLY — the upgrade (level-up card) round trip
+## 6. CONSUME — combat reads resolved components + dispatch tables
 
-```
-kill → EXP orb → walk over it (exp.luau pickupStep)
-  → Progress.addXp(plr, n)                         [progression.luau]
-      level up? → queue a pick, offerNext(plr)
-        → rollCards(state):                        builds candidates =
-            GLOBAL (player)  +  per equipped pet: Registry.pets[id].perks
-            each candidate carries an `apply` closure + a `ctype`
-        → blink.LevelUp.Fire(plr, cards)           [3 cards, kind 0..3]
-  CLIENT (syncCards.luau) shows 3 cards → player clicks
-  → blink.ChooseCard.Fire(idx)
-  → ChooseCard.On(plr, idx):  c = pending[plr][idx]; c.apply(PlayerState.get(plr))
-        player card  → mutates State (damageMult, hpRegen, ...)
-        pet card     → closure captured the slot: `s.weapons[wi]` and runs perk.apply(weapon)
-  → sendWeapons / sendStats  (push refreshed view to the client UI)
-```
+All in `combat.luau`, every `COMBAT_TICK = 1/30`. **Zero inline `state.<modifier>` reads remain in
+the hot paths** — combat gets the player entity from its `characters` query and does
+`world:get(e, PlayerMods)`:
 
-Key detail: a pet card's `apply` is a **closure over the weapon slot index** (`wi`), so it always
-edits the *currently equipped instance* in that slot. Card `kind` on the wire: `0 player stat ·
-1 pet stat · 2 pet perk · 3 new pet` (new-pet cards are disabled — pets come from bosses).
+- **Firing** (`fireStep`): cadence-gated per weapon (`w.fireCd / mods.haste`), then dispatched by a
+  **table** — `KIND_FIRE[w.kind]` (aura / melee / drop / projectile / **bamboo** / **puddle** /
+  **orbit**), with an unknown-kind fallback to `projectile`. Each handler reads `mods.damage /
+  crit / critDmg / atkSize / knock` and the per-weapon `w.*`.
+- **Projectiles** (`bubbleStep`): formula-position bubbles vs the spatial hash; on hit, behavior is
+  decomposed into `bubbleBurst` / `bubbleSplit` / `bubbleChain` / `bubbleReturn` (boomerang),
+  dispatched by what the bubble *carries*, not re-derived.
+- **Ultimates** (`SKILLS[pet]`): keyed by pet id; read `mods.*` for offense (and `State.hp` only
+  for the hp *resource*, e.g. bear's heal). Cooldown = `Registry.pets[id].skill.cooldown ·
+  mods.skillCd`.
+- **Survival** (`damagePlayers`): regen from `mods.regen`; `Humanoid.WalkSpeed` synced to
+  `mods.walkSpeed`; contact damage reduced by `mods.armor`, reflected by `mods.reflect`, negated by
+  `mods.invuln`. The **UFO** drain (`ufo.luau`) reads the same `PlayerMods`, so the turtle shield
+  protects against every damage source consistently.
+- **Movement** (`horde.luau`): mob speed × `SpeedMul`.
+- **Pickups** (`exp` / `healthdrops` / `tixdrops`): radius × `state.pickupRange · itemPickup`.
 
-Pet drops (`petdrops.luau`) call `PlayerState.unlock(id)` which `makeWeapon`s a fresh instance
-into `weapons` or `bench`.
-
----
-
-## 5. COMPUTE / CALL — where the stats are actually used
-
-All in `combat.luau`, every combat tick (`COMBAT_TICK = 1/30`):
-
-- **Firing** (`fireStep`): for each equipped `w`, respects `w.fireCd`/`w.cd`; dispatches by
-  `w.kind` (projectile/aura/drop/melee). Damage = `w.dmg * state.damageMult`, crit roll uses
-  `state.critChance`/`state.critDamage`. Projectile shape uses `w.shots`/`w.spread`/`w.pierce`/
-  `w.split`/`w.speed`/`w.life`/`w.radius`/`w.knock`.
-- **Survival** (`damagePlayers`): `state.hpRegen` heals up to `state.maxHp`; contact damage drains
-  `state.hp`; `Humanoid.WalkSpeed` is synced to `state.walkSpeed` each tick.
-- **Pickups**: `exp.luau` / `healthdrops.luau` / `tixdrops.luau` scale their pickup radius by
-  `state.pickupRange`.
-- **Skills** (`SKILLS` table, keyed by pet id): a skill reads the same `w.*` + `state.*` for its
-  burst. Cooldown comes from `Registry.pets[id].skill.cooldown`, tracked per `[player][slot]`.
-
-So combat **never** hardcodes a number that an upgrade can change — it always reads `state.X` or
-`weapon.X`.
+Combat **never** hardcodes a number an upgrade can change, and never re-derives a modifier — it
+reads the resolved component or the per-weapon instance.
 
 ---
 
-## 6. RESET & META currency
+## 7. PERSIST — the meta layer (DataStore)
 
-`PlayerState.reset(plr)` rebuilds `defaults()` for a new run (fresh stats, fresh axolotl instance
-→ all run upgrades wiped). **Exception: `tix`** is carried over (`reset` copies `old.tix`) — it's
-the *meta* currency, earned from `tixdrops.luau`, banked via `PlayerState.addTix`. Right now `tix`
-lives only in memory; **DataStore persistence is the remaining TODO** (persist `tix`, and later any
-permanent meta-upgrades, on `PlayerRemoving` + load on join).
+`profile.luau` persists across sessions on `PlayerRemoving` (and loads on join): the **Tix**
+balance, the **owned** pet collection, the chosen **main** (`squad`), and **lifetime best-stats**
+(best wave / level / time). `PlayerState.reset(plr)` rebuilds a fresh run but carries `tix`,
+`owned`, and `squad` over. The **Tix shop** (`BuyPet`) lives in `profile.luau` because that module
+owns `addTix` — keeping the balance authority in one place.
 
 ---
 
-## 7. One-line mental model
+## 8. One-line mental model & recipes
 
-> **Registry** = templates (base + perks + skill meta).
-> **State** = the live run (player stats + cloned, upgraded pet instances).
-> **progression** = registers upgrades and applies the chosen `apply` closure to State.
-> **combat** = reads State every tick to act.
-> Adding a stat = add the field to `State`/`defaults`, register a card (`GLOBAL` or a pet `perk`),
-> and read it in `combat`. That's the whole loop.
+> **Registries** = templates (pet base/trees/skill meta, item apply fns).
+> **State** = the live run (player stats + items + gear defense + cloned upgraded pet instances).
+> **progression** = registers upgrades, applies the chosen `apply` to State.
+> **statuses / playerBuffs** = resolve raw effects + State modifiers → derived ECS components.
+> **combat** = reads the *resolved components* (+ per-weapon instances) every tick, via dispatch tables.
+
+**Add a player stat:** field on `State`/`defaults` → register a `GLOBAL` card → (if a combat
+modifier) fold it into `PlayerMods` in `playerBuffs` → read `mods.X` in combat.
+**Add a passive item:** one row in `itemRegistry` (its `apply`). Done — `recomputeItems` + the
+resolver carry it.
+**Add a weapon archetype:** one row in `KIND_FIRE` (+ a `kind` on the pet). Unknown-kind fallback
+means it's never a silent no-op.
+**Add a timed buff:** one row in `BUFF_KIND = {field, op}`; apply it with `PlayerBuffs.apply`.
+**Add a pet:** one entry in `petRegistry` (base + tree + skill) and, if it has an ultimate, one
+`SKILLS[id]`. UI and combat both read the registry automatically.

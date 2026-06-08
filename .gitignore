@@ -14,3 +14,7 @@
 
 # Local AI/dev handoff notes (machine-specific paths)
 /CLAUDE.md
+
+# Imported UI-framework REFERENCE docs — dev-only (the framework CODE the game uses lives in src/std/).
+# Kept locally for the Studio/dev copy; not part of the public portfolio repo.
+/docs/framework/

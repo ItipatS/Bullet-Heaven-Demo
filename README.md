@@ -1,102 +1,189 @@
-# JECS Bullet-Heaven — Server-Authoritative Horde at Scale
+# Bullet Heaven — Server-Authoritative Horde at Scale
 
-A Vampire-Survivors-style **bullet-heaven** on Roblox that runs **~3,000 live enemies at
-~85 FPS** with the **server owning movement, collision, damage, and death** — a scale and a
-kind of authority Roblox is widely assumed to be incapable of. Built on **JECS** (Luau ECS).
+A Vampire-Survivors-style **bullet-heaven** where the **server owns movement, collision,
+damage, and death** for a live horde — **1,000-enemy ship cap, validated to ~3,000 at ~85 FPS**
+— a scale *and* a kind of authority Roblox is widely assumed to be incapable of. Built on a
+data-oriented **ECS (JECS)** with a hand-rolled binary network protocol.
 
-> Full write-up & technique breakdown: [`docs/SPEC.md`](docs/SPEC.md)
+> **Why this is in a portfolio — the engine doesn't matter.** Roblox is just the runtime here.
+> Everything that makes this hard is platform-agnostic **systems engineering**: a data-oriented
+> entity-component-system, an authoritative simulation/replication split, hand-packed binary
+> deltas, spatial-hash broad-phase collision, formula-based ("send the intent, not the state")
+> netcode, and a uniform *apply → resolve → query* data flow with table-driven dispatch. The
+> same architecture drops onto Unity DOTS, Bevy, an authoritative Node game server, or a custom
+> engine — the names change, the engineering doesn't. See **[Transferable engineering](#transferable-engineering-the-point)**.
+
+Deep dives: **[`docs/SPEC.md`](docs/SPEC.md)** (the scale story + measured perf) ·
+**[`docs/STATS.md`](docs/STATS.md)** (the data/stat architecture).
 
 ## Demo
 - **Place:** https://www.roblox.com/games/104444037041931/RPGJECS-DEMO
 - **Video:** [![Watch the video](https://img.youtube.com/vi/eprIcdV42WM/0.jpg)](https://youtu.be/eprIcdV42WM)
 
-> Note: the linked demo/video show the earlier ~150-mob RPG template this grew out of; the
-> current build is the 3,000-mob bullet-heaven described below.
+> The linked video shows the earlier ~150-mob RPG template this grew out of; the current build
+> is the server-authoritative bullet-heaven described below.
 
 ---
 
 ## What it proves
-- Roblox **can** run thousands of **server-authoritative** enemies at interactive framerates
-  (the server decides every hit and death — you can actually lose). Most "horde" games fake
-  this with client-only cosmetic mobs or cap at ~50–200.
-- The right **data-oriented ECS + spatial + replication** stack beats Roblox's per-NPC model
-  by **20–60×**.
-- At horde scale the **GPU is a non-issue** — it's a *logic + bandwidth* problem, and both
-  were made cheap.
 
-## Why that's hard
-The idiomatic Roblox NPC is a `Model` + `Humanoid` (its own state machine, pathfinder, and
-physics) — practical ceiling **~50–200**. The **naive version of this exact game** (R6 rigs +
-per-mob A\* + per-mob raycasts + per-entity replication) **capped at ~150**. The wall isn't
-*drawing* the horde — it's *deciding and streaming* 3,000 enemies' steering, collisions, and
-damage every tick without melting the server or the wire, while the player can die.
+- **Roblox can run a thousand+ *server-authoritative* enemies at interactive framerates** — the
+  server decides every mob's movement, every hit, and every death (you can actually lose). Most
+  platform "horde" games fake this with client-only cosmetic mobs or cap at ~50–200.
+- A **data-oriented ECS + the right spatial/replication stack beats the idiomatic per-NPC model
+  by 20–60×.** The same game built the "normal" way (R6 rig + `Humanoid` + per-mob A\* + per-mob
+  raycasts + per-entity replication) **died at ~150 mobs**.
+- **At horde scale the GPU is a non-issue** — it's a *logic + bandwidth* problem, and both were
+  made cheap. The remaining headroom is all in controllable systems, not the renderer.
 
-## Metrics (Studio play-test; a shipped client runs higher)
+## Why it's hard
+
+The idiomatic Roblox NPC is a `Model` + `Humanoid` carrying its own state machine, pathfinder,
+and physics — practical ceiling ~50–200. The wall isn't *drawing* the horde; it's **deciding and
+streaming** a thousand enemies' steering, neighbor collisions, and damage *every tick*, without
+melting the server CPU or the wire, **while the player can die**. Server authority is the hard
+mode — single-player or cosmetic-only it's invisible; in PvE-with-death it's the whole point.
+
+## Measured (Studio play-test; a shipped client runs higher)
+
 | Scenario | Result |
 |---|---|
-| Naive template ceiling | **~150 mobs** |
+| Idiomatic template ceiling (rigs + per-mob A\*/raycasts) | **~150 mobs** |
 | 10,000 cheap visuals drawn (static) | **147 FPS**, GPU **~1 ms** |
-| 1,000 piled on player → with separation | **25 → 96 FPS** |
+| 1,000 piled on the player → with spatial separation | **25 → 96 FPS** |
 | 1,500 server-authoritative + streaming | **145 idle / 124 moving** (was 61 / 5) |
-| **3,000 mobs (current build)** | **~85 FPS, moving *and* still** |
-| raw 10,000 (last mile pending) | ~10–16 FPS |
+| **3,000 mobs, validated** | **~85 FPS, moving *and* still** |
 
-**Headline: ~20× the naive ceiling, server-authoritative, at 85 FPS — with the GPU idle.**
+**Ships at a 1,000-mob design cap** — deliberately, not as a limit: at a thousand the bottleneck
+shifts from mob count to *projectiles + combat resolution*, which is where a bullet-heaven's load
+*should* live. The horde tech is proven well past the gameplay it's asked to carry.
 
-## How (one technique per order of magnitude)
-- **Render** — a recycled pool driven by one `WorldRoot:BulkMoveTo`/frame (drawing is free;
-  the only cost is *applying* transforms, so we batch them). The validated single-`Part` pool
-  proved the 10k ceiling; the playable build pools **zombie rigs** (anchored root + jointed
-  limbs, procedural walk) on the same driver for fidelity — same technique, richer mob.
-- **Nav** — a **flow field** (one multi-source Dijkstra flood/tick) → **O(1) next-hop per
-  mob** instead of per-mob A\*; Y interpolated along the graph edge → **no per-mob raycasts**,
-  never sinks under the map.
-- **Collision / separation** — a pooled **uniform-grid spatial hash** → **O(N·k)**, reused
-  for bullet hits and crowd separation.
+## How — one technique per order of magnitude
+
+- **Render** — the client is **pure presentation**: a recycled rig pool moved by batched
+  transforms. Drawing 10k is free (147 FPS); the only cost is *applying* transforms, so they're
+  batched. The validated single-`Part` pool proved the ceiling; the playable build pools richer
+  rigs on the same driver — a drop-in swap when raw scale matters.
+- **Nav** — a **flow field** (one multi-source Dijkstra flood per tick from the players' nodes) →
+  **O(1) next-hop per mob** instead of per-mob A\*; Y interpolated **along the graph edge** so
+  mobs hug ramps/drops with **zero per-mob raycasts** and never sink under the map.
+- **Collision / separation** — a pooled **uniform-grid spatial hash** → **O(N·k)** neighbor
+  queries instead of O(N²), rebuilt each tick and reused for bullet hits *and* crowd separation.
 - **Bullets** — **formula projectiles**: broadcast `{origin, velocity, t0}` once; both ends
-  compute `pos = origin + velocity·(now−t0)` off a server-synced clock (~0 wire/bullet); the
-  server tests them against the hash for **authoritative** damage.
-- **Replication** — the **client is pure presentation**: the server streams positions (f16
-  deltas + periodic snapshots); the client interpolates and draws, so it scales and never
-  disagrees with the hitboxes.
+  compute `pos = origin + velocity·(now − t0)` off a server-synced clock (≈0 wire per bullet);
+  the server tests them against the hash for **authoritative** damage.
+- **Replication** — **dense-slot, no-id, i8 deltas**: positions stream in *slot order* (the
+  client maps slot→entity once from the spawn payload), each axis a signed byte of fixed-point
+  motion, with periodic absolute snapshots to clear drift. Dropping the per-mob `u32` id and
+  quantizing to bytes is what keeps 1,000 moving bodies cheap on the wire.
 
 ## It's a game, not a tech demo
-A **main menu** gates the run, then a **wave spawner** ramps hordes with **elite/boss
-spikes** and a **UFO flying enemy** (ignores pathfinding — hovers and attacks at range with
-laser bolts, or a slow player-tracking beam as an elite/boss). Kills feed **XP & leveling**
-→ a **3-card upgrade picker** tagged by category (*player stat / pet stat / perk*). You build
-a loadout of up to **3 of 5 pet weapons** — projectile (piercing bubbles, 3-shot scatter),
-**aura**, **melee cone**, **stone-drop** — each a real archetype with a **signature skill on
-Q / E / R** (Nova, Barrage, Quake, Avalanche, Roar). **Bosses always drop a pet** + a big XP
-orb + currency; **hearts** heal; a **Tix** meta-currency drops in three tiers and **persists
-across sessions via DataStore** (alongside lifetime best-stats). Round it out with **player
-HP, contact + ranged damage, knockback, hit-flash, fly-to-player pickup FX, and death →
-game-over → restart**. A full survive-and-build run loop, all server-authoritative.
 
-A single **pet registry** is the source of truth for every pet (base stats, perks, skill) —
-both the loadout/upgrade UI and the real combat math read the same data, so they never drift.
+A **main menu** gates the run; a **wave spawner** ramps hordes with **elite/boss spikes** and a
+**UFO flying enemy** (ignores pathfinding — hovers at range with laser bolts, or a slow
+player-tracking beam when elite/boss). Kills feed **XP & leveling** → a **card picker** (player
+stats / pet upgrades / passive items). You take **one main pet** into a run from a **collection
+of 11**, and grow the loadout *in-run* (up to 10 weapons) via new-weapon cards and **boss/elite
+pet drops**.
 
-## Architecture (JECS ECS)
-- **Systems** auto-loaded per folder, registered via `scheduler.SYSTEM(fn, phase)`:
-  - `horde` — one server batch: flow-field steer + spatial-hash separation + edge-Y, then
-    position streaming (no per-mob raycasts/LOS)
-  - `ufo` — flying-enemy brain: hover at range, laser bolts / player-tracking beam, own stream
-  - `combat` — pet auto-fire (4 weapon kinds) + skills, formula-bubble sim vs the hash, crit,
-    contact + ranged damage, death/rewards
-  - `exp` / `progression` — tiered EXP pickup & merge, XP/levels, the registry-driven cards
-  - `petdrops` / `healthdrops` / `tixdrops` — boss pet pickups, heart heals, Tix currency
-  - `profile` — DataStore persistence (Tix + lifetime best-stats); `players` — gated spawns
-  - client `syncMobs` (pooled zombie rigs) / `syncUFO` / `syncBubbles` / `syncPet` /
-    `syncCards` / `syncHealth` / `syncTix` / `syncPetDrops` / `weaponpanel` / `skillbar` /
-    `mainmenu` — pure-presentation rendering + UI
-- **Networking** via Blink (schema-generated, never hand-edited) — formula projectiles +
-  position deltas + periodic snapshots + compact event channels for drops/skills/currency.
-- **Single source of truth:** `std/petRegistry.luau` (pet data) feeds both UI and combat.
+Each pet is a **distinct archetype** with a signature ultimate:
+
+| Pet | Archetype | Ultimate |
+|---|---|---|
+| Axolotl | piercing projectiles | **Nova** — full ring of bolts |
+| Fox | ricochet/chain projectiles | **Barrage** — wide aimed burst |
+| Cat | boomerang projectiles (out + back) | **Nine Lives** — boomerang storm |
+| Slime / Cow | damage aura | **Quake** — big pulse |
+| Bear | melee cone + HP sustain | **Roar** — knockback + heal |
+| Mole / Elephant | stone drops on the crowd | **Avalanche** — staggered drops |
+| Panda | **bamboo** ground hazards (interference lattice + knockback) | **Giant Bamboo** |
+| Unicorn | **rainbow puddle** (DoT + slow) | **Taste the Rainbow** — sweeping aim-tracked beam |
+| Turtle | orbiting **shells** + passive armor/thorns | **Shell Nova** — i-frames + radial shove |
+
+Backed by combat primitives — **slow/DoT ground hazards, a sweeping beam, orbiting shells,
+armor / thorns / regen / brief invulnerability, knockback, crit, hit-flash** — and an economy:
+**passive items**, a **Tix** meta-currency that **persists across sessions via DataStore**
+(alongside the owned-pet collection, chosen main, and lifetime best-stats), boss/elite **card
+packs** and **pet drops**, and a **Tix shop**. Plus **mobile support** (on-screen aim stick,
+resolution-scaled HUD). A full survive-and-build loop, all server-authoritative.
+
+## Architecture
+
+```
+ReplicatedStorage/std/   shared: ECS world, components, scheduler/phases, spatial hash,
+                         flow field, pathfinder, config, registries, the generated client net,
+                         and the resolver modules (statuses, playerBuffs)
+ServerScriptService/     authoritative systems (auto-loaded per folder):
+  systems/horde          one batch loop: flow-field steer + hash separation + edge-Y + streaming
+  systems/ufo            flying-enemy brain (hover/bolt/beam) on its own stream
+  systems/combat         pet auto-fire, formula-bubble sim vs the hash, hazards/beam/orbit,
+                         crit, contact + ranged damage, death/rewards
+  systems/statuses       mob status resolver  (raw Slow → derived SpeedMul)
+  systems/playerBuffs    player modifier resolver (gear + items + timed buffs → PlayerMods)
+  systems/{exp,progression,profile,...drops,players}  XP/cards, DataStore, drops, spawn gating
+ClientSystems/           pure-presentation renderers + UI (sync* + HUD/menu/panels)
+```
+
+The codebase converges on one shape everywhere — **apply → resolve → query, with table-driven
+dispatch** — so adding content is *adding a row or a component field*, never extending a branch
+ladder:
+
+- **Resolvers, not inline derivation.** An effect is *applied* in one place; a dedicated system
+  *resolves* it (expire + aggregate) into a **derived ECS component**; consumers `world:get` that
+  component. Mob slows resolve to `SpeedMul` (read by movement); player gear + passive items +
+  timed buffs resolve to `PlayerMods` (read by the entire combat damage *and* firing path).
+  Nothing re-derives "is this active / what's the effective value" at the call site.
+- **Table dispatch, not branch ladders.** Weapon firing is `KIND_FIRE[kind]`, ultimates are
+  `SKILLS[pet]`, buff math is `BUFF_KIND[kind] = {field, op}` — each with a sane fallback so a
+  new/typo'd key is never a silent no-op.
+- **Single source of truth.** `std/petRegistry.luau` (pet data) and `std/itemRegistry.luau` feed
+  both the UI and the real combat math, so the panel and the simulation can never drift.
+- **Networking** via **Blink** — a binary IDL that generates the (never-hand-edited) buffer
+  packing: formula projectiles, dense position deltas, periodic snapshots, and compact event
+  channels for hazards / skills / drops / currency.
+
+Full pipeline write-up: **[`docs/STATS.md`](docs/STATS.md)**.
+
+## Transferable engineering (the point)
+
+What a reviewer should read past "it's Roblox" and see:
+
+| In this repo | The general skill |
+|---|---|
+| JECS world, archetype queries, `:cached()` hot loops | **data-oriented ECS** design & cache-friendly iteration |
+| Server owns HP/hits/death; client renders only | **authoritative simulation / presentation split** (anti-cheat-shaped) |
+| Dense-slot, no-id, i8 fixed-point deltas + snapshots | **hand-packed binary protocol design** & quantization/bandwidth budgeting |
+| `pos = origin + vel·(now−t0)` on a synced clock | **formula/event netcode** — replicate intent, compute on both ends |
+| Pooled uniform-grid spatial hash | **spatial partitioning / O(N²) → O(N·k) broad-phase** |
+| Flow field (multi-source Dijkstra) → O(1) next-hop | **shared-cost pathfinding at crowd scale** |
+| `apply → resolve → query` resolvers + dispatch tables | **decoupled, data-driven architecture** that scales by addition, not branching |
+| Phase scheduler (deterministic system order) | **frame/tick pipeline design** |
+
+None of these are engine features — they're the engineering. Roblox just happens to be where it
+runs.
+
+## Tech stack & tooling
+
+- **Luau** on Roblox · **[JECS](https://github.com/ukendio/jecs)** ECS (pinned 0.9.0)
+- **[Blink](https://github.com/1Axen/blink)** networking IDL (binary codegen; never hand-edited)
+- **[Rojo](https://rojo.space/)** filesystem ↔ Studio sync · **[Rokit](https://github.com/rojo-rbx/rokit)** toolchain manager
+- **[Lune](https://github.com/lune-org/lune)** for headless Luau syntax/compile checks
+- A non-Rodux subset of an in-house UI framework lives in `std/` (tag-driven UI traits, device
+  detection, formatting/tween/SFX helpers).
+
+## Build / run
+
+1. Install the toolchain: `rokit install` (pulls Rojo, Blink, Lune, etc. from `rokit.toml`).
+2. Regenerate the network layer if `Net.blink` changed: `blink Net.blink` →
+   `src/std/ClientNet.luau` + `src/ServerScriptService/ServerNet.luau` (generated; don't hand-edit).
+3. Sync to Studio: `rojo serve` and connect the Rojo Studio plugin.
+4. Press Play. Stress/debug toggles live in **`src/std/config.luau`** (`STRESS_TEST`,
+   `INVINCIBLE`, `SHOW_FPS`) — ship with all off.
 
 ## Honest limits
-- 3,000 is **verified smooth** with the single-`Part` pool; raw 10,000 is the **last mile**
-  (client render LOD/throttle + dense-slot i8 replication — optimization, not redesign).
-- The playable build trades some of that headroom for **zombie rigs** (richer visuals, ~7×
-  the parts); the single-`Part` renderer is a drop-in swap when raw scale matters.
-- Numbers are Studio play-test; a shipped client runs higher.
-- Single-player verified; co-op is designed in (per-player state) but not load-tested.
+
+- Numbers are Studio play-tests (server + client on one machine); a shipped client runs higher.
+- Raw 10,000 mobs is the **last mile** — render LOD/throttle on the client; the *server*
+  simulation and the dense-slot wire format already carry it.
+- Single-player is the verified path; co-op is designed in (all state is per-player) but not yet
+  load-tested with multiple live clients.
