@@ -9,7 +9,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
-local TeleportService   = game:GetService("TeleportService")
 
 local std   = ReplicatedStorage.std
 local blink = require(std:WaitForChild("ClientNet"))
@@ -73,7 +72,7 @@ Instance.new("UICorner").Parent = btn
 -- Same codebase, two published places; config auto-detects which one we're in (Config.Places).
 local switchBtn = Instance.new("TextButton")
 switchBtn.AnchorPoint = Vector2.new(0.5, 0.5)
-switchBtn.Position = UDim2.new(0.5, 0, 0.56, 0)
+switchBtn.Position = UDim2.new(0.5, 0, 0.675, 0)
 switchBtn.Size = UDim2.new(0, 320, 0, 40)
 switchBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 75)
 switchBtn.Font = Enum.Font.GothamBold
@@ -85,7 +84,7 @@ Instance.new("UICorner").Parent = switchBtn
 
 local switchCaption = Instance.new("TextLabel")
 switchCaption.AnchorPoint = Vector2.new(0.5, 0.5)
-switchCaption.Position = UDim2.new(0.5, 0, 0.61, 0)
+switchCaption.Position = UDim2.new(0.5, 0, 0.625, 0)
 switchCaption.Size = UDim2.new(0, 620, 0, 20)
 switchCaption.BackgroundTransparency = 1
 switchCaption.Font = Enum.Font.Gotham
@@ -101,18 +100,13 @@ switchBtn.Activated:Connect(function()
     if teleporting then return end
     teleporting = true
     switchBtn.Text = "Teleporting…"
-    local target = if Config.Places.IS_SHOWCASE then Config.Places.REAL else Config.Places.SHOWCASE
-    local ok = pcall(function() TeleportService:Teleport(target, player) end)
-    if not ok then
-        teleporting = false
-        switchBtn.Text = "Teleport failed — try again"
-    end
+    blink.SwitchPlace.Fire(1) -- server picks the target place + TeleportAsyncs us (safe cross-place path)
 end)
 
 -- persisted best stats (from the DataStore profile)
 local best = Instance.new("TextLabel")
 best.AnchorPoint = Vector2.new(0.5, 0.5)
-best.Position = UDim2.new(0.5, 0, 0.67, 0)
+best.Position = UDim2.new(0.5, 0, 0.75, 0)
 best.Size = UDim2.new(0, 700, 0, 26)
 best.BackgroundTransparency = 1
 best.Font = Enum.Font.GothamBold
@@ -130,7 +124,7 @@ end)
 
 local controls = Instance.new("TextLabel")
 controls.AnchorPoint = Vector2.new(0.5, 0.5)
-controls.Position = UDim2.new(0.5, 0, 0.75, 0)
+controls.Position = UDim2.new(0.5, 0, 0.85, 0)
 controls.Size = UDim2.new(0, 700, 0, 30)
 controls.BackgroundTransparency = 1
 controls.Font = Enum.Font.GothamMedium

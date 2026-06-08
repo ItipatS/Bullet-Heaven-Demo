@@ -294,6 +294,16 @@ event Restart {
     Data: u8
 }
 
+-- Client → server: switch to the OTHER place (showcase ⇄ real game). The server decides the target
+-- from its own game.PlaceId and TeleportAsyncs the player (safer than a client-side Teleport). Data unused.
+event SwitchPlace {
+    From: Client,
+    Type: Reliable,
+    Call: SingleSync,
+    Poll: false,
+    Data: u8
+}
+
 -- Server → all: the current round just ended (the last living player fell → field wiped). Frees
 -- every ghost back to the menu so they can press Play to start the next round. ManySync: both the
 -- death/spectate screen (exit spectate) and the main menu (re-show) listen.

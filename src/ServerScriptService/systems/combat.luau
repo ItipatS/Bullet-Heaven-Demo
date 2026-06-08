@@ -48,6 +48,14 @@ local Knock      = cts.Knock
 local Slot       = cts.Slot
 local PlayerMods = cts.PlayerMods
 
+-- Fallback modifier set used by damagePlayers if a player's PlayerMods isn't resolved yet (~never — the
+-- resolver runs in AIStateMachine before Combat). Fail CLOSED: no armor / no invuln so the player still
+-- takes damage. NEVER fail open to "invincible" — that footgun was masked while Debug.INVINCIBLE was on.
+local DEFAULT_MODS = {
+    invuln = false, armor = 0, reflect = 0, regen = 0, walkSpeed = 16,
+    damage = 0, crit = 0, critDmg = 0, atkSize = 1, knock = 1, haste = 1, skillCd = 1,
+}
+
 -- ── Tunables ──────────────────────────────────────────────────────────────────
 local Y_TOL2        = 6 * 6
 -- Mob collision scales with the mob's visual size: a big boss should be hittable across its whole
@@ -842,9 +850,9 @@ local function damagePlayers(dt: number)
         local state = PlayerState.get(plr)
         if not state.playing then continue end
         -- ALL combat modifiers (passive gear defense + active timed buffs) are resolved by the
-        -- playerBuffs system into PlayerMods — read them here, never re-derive inline.
-        local mods = world:get(e, PlayerMods)
-        if not mods then continue end -- resolver hasn't written this player yet (first frame of play)
+        -- playerBuffs system into PlayerMods — read them here, never re-derive inline. Fall back to a
+        -- no-armor/no-invuln default if it's somehow unresolved, so a hiccup can never read as invincible.
+        local mods = world:get(e, PlayerMods) or DEFAULT_MODS
         -- regen: Regeneration card + bear regenBonus + any timed regen buff (all folded into mods.regen)
         if mods.regen > 0 and state.hp < state.maxHp then
             state.hp = math.min(state.maxHp, state.hp + mods.regen * dt)

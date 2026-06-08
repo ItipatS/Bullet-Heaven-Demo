@@ -13,7 +13,7 @@ local Config = {}
 
 -- ── Places (showcase ⇄ real game) ───────────────────────────────────────────────
 local SHOWCASE_PLACE = 101281382095901
-local REAL_PLACE     = 79858913774130
+local REAL_PLACE     =  79858913774130
 -- Studio override: leave nil to auto-detect by PlaceId; set true/false to force a mode while testing.
 local FORCE_SHOWCASE: boolean? = nil
 local IS_SHOWCASE = if FORCE_SHOWCASE ~= nil then FORCE_SHOWCASE else game.PlaceId == SHOWCASE_PLACE
@@ -53,7 +53,9 @@ Config.Spawn = {
     WAVE_GROW    = 18,      -- +mobs per wave
     HP_GROWTH    = 0.35,    -- +HP per wave
     ELITE_FROM   = 2,       -- first wave with elites
-    BOSS_EVERY   = 1,       -- a boss (→ drops a PET) every Nth wave
+    -- a boss (→ drops a PET) every Nth wave. Place-gated: SHOWCASE = every wave (spectacle / fast pet
+    -- unlocks while you're invincible); REAL game = every 5th (proper pacing — bosses are a real wall).
+    BOSS_EVERY   = if IS_SHOWCASE then 1 else 5,
     BREATHER     = 3.0,     -- seconds between waves
     MAX_WAVE_TIME = 90,     -- force the next wave if a few stragglers never die
     SPAWN_EVERY  = 0.08,

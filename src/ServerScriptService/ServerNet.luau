@@ -165,9 +165,10 @@ Queue.Reliable[12] = table.create(256)
 Queue.Unreliable[2] = table.create(256)
 Queue.Reliable[13] = table.create(256)
 Queue.Reliable[15] = table.create(256)
-Queue.Reliable[19] = table.create(256)
+Queue.Reliable[16] = table.create(256)
 Queue.Reliable[20] = table.create(256)
 Queue.Reliable[21] = table.create(256)
+Queue.Reliable[22] = table.create(256)
 export type state = {[string]: string}
 export type DeltaChunk = { base: number, deltas: { number } }
 export type TransformFull = { id: number, dp: Vector3 }
@@ -674,17 +675,24 @@ function SerdesFunctions.ReadEVENT_Restart(): (number)
 	return Value
 end
 
+function SerdesFunctions.ReadEVENT_SwitchPlace(): (number)
+	-- Read BLOCK: 1 bytes
+	local BLOCK_START = Read(1)
+	local Value = buffer.readu8(RecieveBuffer, BLOCK_START + 0)
+	return Value
+end
+
 function SerdesFunctions.WriteEVENT_RoundOver(Value: number): ()
 	-- Allocate BLOCK: 2 bytes
 	local BLOCK_START = Allocate(2)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 16)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 17)
 	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Weapons(Value: { string }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 17)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 18)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 2 bytes
@@ -705,7 +713,7 @@ end
 function SerdesFunctions.WriteEVENT_Unlocked(Value: { string }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 18)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 19)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 2 bytes
@@ -764,7 +772,7 @@ end
 function SerdesFunctions.WriteEVENT_Items(Value: { { id: string, level: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 22)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 23)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 3 bytes
@@ -789,14 +797,14 @@ end
 function SerdesFunctions.WriteEVENT_MainWeapon(Value: number): ()
 	-- Allocate BLOCK: 2 bytes
 	local BLOCK_START = Allocate(2)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 23)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 24)
 	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Effect(Value: { { kind: number, pos: Vector3, radius: number, dir: Vector3 } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 24)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 25)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 29 bytes
@@ -844,7 +852,7 @@ end
 function SerdesFunctions.WriteEVENT_HazardSpawn(Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 25)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 26)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 25 bytes
@@ -887,7 +895,7 @@ end
 function SerdesFunctions.WriteEVENT_HazardRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 26)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 27)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -905,7 +913,7 @@ end
 function SerdesFunctions.WriteEVENT_UltBeam(Value: { active: number, life: number, width: number, length: number }): ()
 	-- Allocate BLOCK: 14 bytes
 	local BLOCK_START = Allocate(14)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 27)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 28)
 	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value.active)
 	buffer.writef32(SendBuffer, BLOCK_START + 2, Value.life)
 	buffer.writef32(SendBuffer, BLOCK_START + 6, Value.width)
@@ -915,14 +923,14 @@ end
 function SerdesFunctions.WriteEVENT_WaveStart(Value: number): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 28)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 29)
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Stats(Value: { level: number, xp: number, xpNext: number, hp: number, maxHp: number }): ()
 	-- Allocate BLOCK: 15 bytes
 	local BLOCK_START = Allocate(15)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 29)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 30)
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value.level)
 	buffer.writeu32(SendBuffer, BLOCK_START + 3, Value.xp)
 	buffer.writeu32(SendBuffer, BLOCK_START + 7, Value.xpNext)
@@ -951,7 +959,7 @@ end
 function SerdesFunctions.WriteEVENT_Toast(Value: string): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 30)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 31)
 	local Length = #Value
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Length)
 	Allocate(Length)
@@ -961,7 +969,7 @@ end
 function SerdesFunctions.WriteEVENT_PetDropSpawn(Value: { { id: number, pos: Vector3, pet: string } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 31)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 32)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 18 bytes
@@ -999,7 +1007,7 @@ end
 function SerdesFunctions.WriteEVENT_PetDropRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 32)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 33)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -1017,7 +1025,7 @@ end
 function SerdesFunctions.WriteEVENT_CardDropSpawn(Value: { { id: number, pos: Vector3 } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 33)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 34)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 16 bytes
@@ -1048,7 +1056,7 @@ end
 function SerdesFunctions.WriteEVENT_CardDropRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 34)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 35)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -1066,7 +1074,7 @@ end
 function SerdesFunctions.WriteEVENT_HealthSpawn(Value: { { id: number, pos: Vector3 } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 35)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 36)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 16 bytes
@@ -1097,7 +1105,7 @@ end
 function SerdesFunctions.WriteEVENT_HealthRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 36)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 37)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -1115,7 +1123,7 @@ end
 function SerdesFunctions.WriteEVENT_TixSpawn(Value: { { id: number, pos: Vector3, amount: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 37)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 38)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 20 bytes
@@ -1150,7 +1158,7 @@ end
 function SerdesFunctions.WriteEVENT_TixRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 38)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 39)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -1168,14 +1176,14 @@ end
 function SerdesFunctions.WriteEVENT_TixCount(Value: number): ()
 	-- Allocate BLOCK: 5 bytes
 	local BLOCK_START = Allocate(5)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 39)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 40)
 	buffer.writeu32(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Profile(Value: { tix: number, bestWave: number, bestLevel: number, bestTime: number, totalKills: number, runs: number }): ()
 	-- Allocate BLOCK: 21 bytes
 	local BLOCK_START = Allocate(21)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 40)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 41)
 	buffer.writeu32(SendBuffer, BLOCK_START + 1, Value.tix)
 	buffer.writeu16(SendBuffer, BLOCK_START + 5, Value.bestWave)
 	buffer.writeu16(SendBuffer, BLOCK_START + 7, Value.bestLevel)
@@ -1284,7 +1292,7 @@ end
 function SerdesFunctions.WriteEVENT_UfoFire(Value: { { origin: Vector3, vel: Vector3, t0: number, life: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 41)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 42)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 36 bytes
@@ -1533,6 +1541,9 @@ if not RunService:IsRunning() then
 		FireExcept = NOOP
 	},
 	Restart = {
+		On = NOOP
+	},
+	SwitchPlace = {
 		On = NOOP
 	},
 	RoundOver = {
@@ -1795,38 +1806,49 @@ Reliable.OnServerEvent:Connect(function(Player: Player, Buffer: buffer, Instance
 				end
 				table.insert(Queue.Reliable[15], {Player, Value} :: {any})
 			end
-		elseif Index == 19 then
-			local Value: { string } = SerdesFunctions.ReadEVENT_SwitchWeapons()
-			if Events.Reliable[19] ~= nil then
-				SerdesEvent = "SwitchWeapons"
-				Events.Reliable[19](Player, Value)
+		elseif Index == 16 then
+			local Value: number = SerdesFunctions.ReadEVENT_SwitchPlace()
+			if Events.Reliable[16] ~= nil then
+				SerdesEvent = "SwitchPlace"
+				Events.Reliable[16](Player, Value)
 			else
-				if #Queue.Reliable[19] > 256 then
-					warn("[Blink]: Event queue of \"SwitchWeapons\" exceeded 256, did you forget to implement a listener?")
+				if #Queue.Reliable[16] > 256 then
+					warn("[Blink]: Event queue of \"SwitchPlace\" exceeded 256, did you forget to implement a listener?")
 				end
-				table.insert(Queue.Reliable[19], {Player, Value} :: {any})
+				table.insert(Queue.Reliable[16], {Player, Value} :: {any})
 			end
 		elseif Index == 20 then
-			local Value: string = SerdesFunctions.ReadEVENT_SetMain()
+			local Value: { string } = SerdesFunctions.ReadEVENT_SwitchWeapons()
 			if Events.Reliable[20] ~= nil then
-				SerdesEvent = "SetMain"
+				SerdesEvent = "SwitchWeapons"
 				Events.Reliable[20](Player, Value)
 			else
 				if #Queue.Reliable[20] > 256 then
-					warn("[Blink]: Event queue of \"SetMain\" exceeded 256, did you forget to implement a listener?")
+					warn("[Blink]: Event queue of \"SwitchWeapons\" exceeded 256, did you forget to implement a listener?")
 				end
 				table.insert(Queue.Reliable[20], {Player, Value} :: {any})
 			end
 		elseif Index == 21 then
-			local Value: string = SerdesFunctions.ReadEVENT_BuyPet()
+			local Value: string = SerdesFunctions.ReadEVENT_SetMain()
 			if Events.Reliable[21] ~= nil then
-				SerdesEvent = "BuyPet"
+				SerdesEvent = "SetMain"
 				Events.Reliable[21](Player, Value)
 			else
 				if #Queue.Reliable[21] > 256 then
-					warn("[Blink]: Event queue of \"BuyPet\" exceeded 256, did you forget to implement a listener?")
+					warn("[Blink]: Event queue of \"SetMain\" exceeded 256, did you forget to implement a listener?")
 				end
 				table.insert(Queue.Reliable[21], {Player, Value} :: {any})
+			end
+		elseif Index == 22 then
+			local Value: string = SerdesFunctions.ReadEVENT_BuyPet()
+			if Events.Reliable[22] ~= nil then
+				SerdesEvent = "BuyPet"
+				Events.Reliable[22](Player, Value)
+			else
+				if #Queue.Reliable[22] > 256 then
+					warn("[Blink]: Event queue of \"BuyPet\" exceeded 256, did you forget to implement a listener?")
+				end
+				table.insert(Queue.Reliable[22], {Player, Value} :: {any})
 			end
 		end
 	end
@@ -2584,6 +2606,20 @@ local Returns = table.freeze({
 			end
 		end
 	},
+	SwitchPlace = {
+		On = function(Listener: (Player: Player, Value: number) -> ()): () -> ()
+			Events.Reliable[16] = Listener
+			for Index, Arguments in Queue.Reliable[16] do
+				Listener(table.unpack(Arguments))
+			end
+			Queue.Reliable[16] = {}
+			return function (): ()
+				if Events.Reliable[16] == Listener then
+					Events.Reliable[16] = nil
+				end
+			end
+		end
+	},
 	RoundOver = {
 		Fire = function(Player: Player, Value: number): ()
 			Load(PlayersMap[Player])
@@ -2724,20 +2760,6 @@ local Returns = table.freeze({
 	},
 	SwitchWeapons = {
 		On = function(Listener: (Player: Player, Value: { string }) -> ()): () -> ()
-			Events.Reliable[19] = Listener
-			for Index, Arguments in Queue.Reliable[19] do
-				Listener(table.unpack(Arguments))
-			end
-			Queue.Reliable[19] = {}
-			return function (): ()
-				if Events.Reliable[19] == Listener then
-					Events.Reliable[19] = nil
-				end
-			end
-		end
-	},
-	SetMain = {
-		On = function(Listener: (Player: Player, Value: string) -> ()): () -> ()
 			Events.Reliable[20] = Listener
 			for Index, Arguments in Queue.Reliable[20] do
 				Listener(table.unpack(Arguments))
@@ -2750,7 +2772,7 @@ local Returns = table.freeze({
 			end
 		end
 	},
-	BuyPet = {
+	SetMain = {
 		On = function(Listener: (Player: Player, Value: string) -> ()): () -> ()
 			Events.Reliable[21] = Listener
 			for Index, Arguments in Queue.Reliable[21] do
@@ -2760,6 +2782,20 @@ local Returns = table.freeze({
 			return function (): ()
 				if Events.Reliable[21] == Listener then
 					Events.Reliable[21] = nil
+				end
+			end
+		end
+	},
+	BuyPet = {
+		On = function(Listener: (Player: Player, Value: string) -> ()): () -> ()
+			Events.Reliable[22] = Listener
+			for Index, Arguments in Queue.Reliable[22] do
+				Listener(table.unpack(Arguments))
+			end
+			Queue.Reliable[22] = {}
+			return function (): ()
+				if Events.Reliable[22] == Listener then
+					Events.Reliable[22] = nil
 				end
 			end
 		end
