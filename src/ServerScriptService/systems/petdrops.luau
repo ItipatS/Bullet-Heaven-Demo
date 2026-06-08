@@ -64,13 +64,21 @@ local function emitSpawn(d: Drop)
     blink.PetDropSpawn.FireAll({ { id = d.id, pos = Vector3.new(d.x, d.y, d.z), pet = d.pet } })
 end
 
--- ── Public: a boss died at (x,z) → drop a pet ─────────────────────────────────────
+-- ── Public ────────────────────────────────────────────────────────────────────────
+local ELITE_PET_CHANCE = 0.2 -- an elite UNCOMMONLY drops a pet
 local M = {}
+
+-- drop a pet pickup at (x,z) — prefers one nobody owns yet (a meaningful unlock)
 function M.dropBoss(x: number, z: number)
     nextId += 1
     local d: Drop = { id = nextId, x = x, y = groundY(x, z), z = z, pet = pickPet() }
     drops[nextId] = d
     emitSpawn(d)
+end
+
+-- elite death: an uncommon chance to drop a pet
+function M.maybeDropElite(x: number, z: number)
+    if math.random() < ELITE_PET_CHANCE then M.dropBoss(x, z) end
 end
 
 -- ── Pickup tick (proximity) ───────────────────────────────────────────────────────
@@ -82,7 +90,7 @@ local function pickupStep()
 
     for _, plr in Players:GetPlayers() do
         local state = PlayerState.get(plr)
-        if state.dead then continue end
+        if not state.playing then continue end
         local char = plr.Character
         local root = char and char:FindFirstChild("HumanoidRootPart")
         if not root then continue end
@@ -98,13 +106,18 @@ local function pickupStep()
                     removeBatch[#removeBatch + 1] = id
                     local pet = Registry.pets[d.pet]
                     local name = (pet and pet.name) or d.pet
-                    if PlayerState.unlock(plr, d.pet) then
-                        blink.Toast.Fire(plr, "New pet: " .. name .. "!")
-                        Progress.pushLoadout(plr)
+                    -- pickup UNLOCKS the pet in the collection (pet tab) AND adds it to the current run
+                    local isNew = PlayerState.ownPet(plr, d.pet)
+                    local added = PlayerState.addToRun(plr, d.pet)
+                    if isNew then
+                        blink.Toast.Fire(plr, "New pet: " .. name .. "!  ★ unlocked + joined")
+                    elseif added then
+                        blink.Toast.Fire(plr, name .. " joined your run!")
                     else
-                        Progress.addXp(plr, DUP_XP) -- already owned → consolation XP
-                        blink.Toast.Fire(plr, "Duplicate " .. name .. " — +" .. DUP_XP .. " XP")
+                        Progress.addXp(plr, DUP_XP) -- already in the run → consolation XP
+                        blink.Toast.Fire(plr, name .. " — +" .. DUP_XP .. " XP")
                     end
+                    if isNew or added then Progress.pushLoadout(plr) end
                 end
             end
         end

@@ -1,7 +1,8 @@
 -- ClientSystems/syncBubbles.luau
 -- Renders bubble projectiles. The server broadcasts each shot once (origin, velocity, t0,
 -- life); the client computes pos = origin + velocity*age every frame (same formula the
--- server damages with) and despawns after `life`. Bubbles are few, so plain Position writes.
+-- server damages with) and despawns after `life`. Skills (Nova/Barrage) + splits mean
+-- hundreds can be live, so all positions are pushed in ONE BulkMoveTo per frame.
 --!optimize 2
 --!strict
 
@@ -66,18 +67,28 @@ blink.RemoveBubble.On(function(ids)
     end
 end)
 
+-- Reused scratch arrays for the one-shot BulkMoveTo (no per-frame realloc).
+local moveParts: { BasePart } = {}
+local moveCfs: { CFrame } = {}
+
 local function step()
     local now = workspace:GetServerTimeNow()
+    local w = 0
     for id, b in active do
         local age = now - b.t0
         if age >= b.life then
             b.part.Parent = nil
             free[#free + 1] = b.part
-            active[id] = nil
+            active[id] = nil -- removing the current key mid-iteration is fine; we never add here
         else
-            b.part.Position = Vector3.new(b.ox + b.vx * age, b.oy + b.vy * age, b.oz + b.vz * age)
+            w += 1
+            moveParts[w] = b.part
+            moveCfs[w] = CFrame.new(b.ox + b.vx * age, b.oy + b.vy * age, b.oz + b.vz * age)
         end
     end
+    -- trim scratch tails from a previous (larger) frame, then move the whole field at once
+    for i = #moveParts, w + 1, -1 do moveParts[i] = nil; moveCfs[i] = nil end
+    if w > 0 then workspace:BulkMoveTo(moveParts, moveCfs, Enum.BulkMoveMode.FireCFrameChanged) end
 end
 
 scheduler.SYSTEM(step, phases.Heartbeat)

@@ -7,7 +7,8 @@
 --   • Y      — interpolated ALONG the current graph edge (F→T node heights). This keeps mobs on
 --     the walkable surface (they climb ramps / take drops via the path) so they never sink under
 --     overhangs, and per-mob edge progress avoids a flat floating plane on slopes. No raycast.
--- Positions are streamed to clients (UpdateTransformDelta f16 + periodic UpdateTransformFull f32).
+-- Positions are streamed DENSE: i8 slot-ordered deltas (UpdateTransformDelta, no per-mob id) +
+-- a periodic absolute f32 snapshot (UpdateTransformFull) to clear drift. See std/config.luau Net.
 --!optimize 2
 --!strict
 
@@ -25,6 +26,8 @@ local SpatialHash = require(std.spatialhash)
 local PathFinder  = require(std.PathFinder)
 local FlowField   = require(std.FlowField)
 local pathData    = require(std.PathData)
+local Config      = require(std.config)
+local PlayerState = require(std.playerState)
 
 local Transform = cts.Transform
 local Speed     = cts.Speed
@@ -33,6 +36,8 @@ local PathNode  = cts.PathNode
 local Character  = cts.Character
 local Player     = cts.Player
 local Knock      = cts.Knock
+local Slot       = cts.Slot
+local SpeedMul   = cts.SpeedMul
 
 local Waypoints = pathData[1]
 
@@ -41,23 +46,31 @@ local MOVE_TICK     = 1 / 20
 local KNOCK_DECAY   = 6       -- knockback impulse decay rate
 local SEP_RADIUS    = 3
 local SEP_R2        = SEP_RADIUS * SEP_RADIUS
-local SEP_GAIN      = 2.0     -- separation weight vs steer (higher → spreads more)
+local SEP_GAIN      = 1.4     -- separation weight vs steer (lower → less side-shuffle, more charge)
 local HASH_CELL     = 6       -- ≥ SEP_RADIUS
-local ADVANCE_DIST2 = 16      -- advance to next node within 4 studs (XZ)
+local ADVANCE_DIST2 = 36      -- advance to next node within 6 studs (XZ); wider so the lane offset
+                              -- below never strands a mob just shy of a node it can't quite reach
+local LANE_GAIN     = 0.12    -- per-mob perpendicular bias (small): a touch of spread without the
+                              -- swirl/spin — vampire-survivors mobs CHARGE the player, not orbit
+local CORNER_CUT    = 0.3     -- blend the aim toward the node AFTER next → arc through turns
 local CONTACT       = 2
 local CONTACT2      = CONTACT * CONTACT
 
--- streaming
-local NET_TICK   = 1 / 15
-local FULL_EVERY = 3          -- seconds between absolute snapshots (clears f16 drift)
-local CHUNK      = 80         -- mobs per packet (id u32 + dp f16 ≈ 10B → < 900B cap)
+-- streaming (dense-slot + i8 deltas — constants shared with the client via std/config.luau Net)
+local Net        = Config.Net
+local NET_TICK   = Net.NET_TICK
+local FULL_EVERY = Net.FULL_EVERY
+local CHUNK      = Net.CHUNK
+local STEP       = Net.STEP
+local INV_STEP   = 1 / Net.STEP
+local WARP       = Net.WARP_THRESH
 
 -- ── Nav ─────────────────────────────────────────────────────────────────────────
 local pathfinder = PathFinder.fromWaypoints(pathData[1], pathData[2])
 local field      = FlowField.new(pathData[1], pathData[2])
 
 local zombies    = world:query(Transform, Speed, PathNode):with(Mob):cached()
-local characters = world:query(Character):with(Player):cached()
+local characters = world:query(Character, Player):cached()
 
 local hash = SpatialHash.new(HASH_CELL)
 local out: { number } = {}
@@ -69,7 +82,8 @@ local sources: { number } = {}
 local function gatherPlayers()
     table.clear(pPos)
     table.clear(sources)
-    for _e, char in characters do
+    for _e, char, plr in characters do
+        if not PlayerState.get(plr).playing then continue end -- ignore parked lobby / ghost bodies
         local root = (char :: Model).PrimaryPart
         if not root then continue end
         local node = pathfinder:GetNearestWaypoint(root.Position)
@@ -98,6 +112,12 @@ local function moveStep(dt: number)
     for e, transform, speed, node in zombies do
         local pos = posCache[e]
 
+        -- status effects fold into a single derived multiplier (std/statuses owns it). Movement just
+        -- multiplies — it never knows what a "slow" is. Absent SpeedMul = normal speed.
+        local mvSpeed = speed
+        local mul = world:get(e, SpeedMul)
+        if mul then mvSpeed = speed * mul end
+
         -- nearest player (XZ)
         local bx, bz, bestD2 = pos.X, pos.Z, math.huge
         for _, pp in pPos do
@@ -110,10 +130,27 @@ local function moveStep(dt: number)
         local nextHop = field:next(node)
         local T: Vector3? = if nextHop then Waypoints[nextHop][1] :: Vector3 else nil
 
-        -- steer toward the next path node, or beeline to the player once at the player's node
+        -- steer toward the next path node, or beeline to the player on the final approach. The lane
+        -- fan-out (below) is applied ONLY mid-path (`fanOut`): once the NEXT node is the player's own
+        -- cell (hop2 == nil) we head straight at the player, so the clump closes in instead of the
+        -- perpendicular nudge orbiting them around the node (the "stuck, circling" swarm).
         local steerX, steerZ = 0, 0
+        local fanOut = false
         if T then
-            steerX, steerZ = T.X - pos.X, T.Z - pos.Z
+            local hop2 = field:next(nextHop :: number) -- T non-nil ⇒ nextHop non-nil; nil ⇒ next IS the player's cell
+            if hop2 then
+                -- mid-path: corner-cutting look-ahead toward the node AFTER next, so the crowd arcs
+                -- through a turn instead of all pivoting on T. Fan-out is on here.
+                local T2 = Waypoints[hop2][1] :: Vector3
+                local aimX = T.X + (T2.X - T.X) * CORNER_CUT
+                local aimZ = T.Z + (T2.Z - T.Z) * CORNER_CUT
+                steerX, steerZ = aimX - pos.X, aimZ - pos.Z
+                fanOut = true
+            else
+                -- final approach (next node IS the player's cell): beeline straight at the player
+                local dx, dz = bx - pos.X, bz - pos.Z
+                if dx * dx + dz * dz > CONTACT2 then steerX, steerZ = dx, dz end
+            end
         else
             local dx, dz = bx - pos.X, bz - pos.Z
             if dx * dx + dz * dz > CONTACT2 then steerX, steerZ = dx, dz end
@@ -141,14 +178,24 @@ local function moveStep(dt: number)
             end
         end
 
+        -- per-mob lane bias: a stable perpendicular nudge (only while path-following, so the final
+        -- beeline to the player stays direct) → the horde fans into a band instead of single-file,
+        -- which looks less uniform and eases the chokepoint funneling.
+        local laneX, laneZ = 0, 0
+        if fanOut then -- mid-path only — never on the final approach (else they orbit the player)
+            local lane = ((e % 21) / 10) - 1 -- stable ~[-1, 1] per mob
+            laneX = -steerZ * lane * LANE_GAIN
+            laneZ =  steerX * lane * LANE_GAIN
+        end
+
         -- combine + integrate XZ
-        local vx = steerX + sepX * SEP_GAIN
-        local vz = steerZ + sepZ * SEP_GAIN
+        local vx = steerX + laneX + sepX * SEP_GAIN
+        local vz = steerZ + laneZ + sepZ * SEP_GAIN
         local vm = math.sqrt(vx * vx + vz * vz)
         local nx, nz = pos.X, pos.Z
         if vm > 1e-4 then
-            nx = pos.X + (vx / vm) * speed * dt
-            nz = pos.Z + (vz / vm) * speed * dt
+            nx = pos.X + (vx / vm) * mvSpeed * dt
+            nz = pos.Z + (vz / vm) * mvSpeed * dt
         end
 
         -- knockback (impulse from a hit, decays) — applied on top of steering. Value-update
@@ -182,32 +229,82 @@ local function moveStep(dt: number)
     end
 end
 
--- ── Streaming ──────────────────────────────────────────────────────────────────
-local lastSent: { [number]: Vector3 } = {}
-local batch = {}
+-- ── Streaming (dense-slot + i8 deltas) ───────────────────────────────────────────
+-- The wire carries NO per-mob id: deltas are written in SLOT order (the client maps slot→entity
+-- from the Spawn payload). Each axis is an i8 in STEP-sized fixed-point. `lastSent[slot]` is the
+-- position the client has integrated from prior deltas — diffing against it accumulates motion
+-- AND carries the quantization residual, so summed i8 deltas never drift.
+local streamQuery = world:query(Transform, Slot):with(Mob):cached()
 
-local function sendStep(full: boolean)
-    table.clear(batch)
-    for e, transform in zombies do
-        local pos = transform.new.Position
-        if full then
-            lastSent[e] = pos
-            batch[#batch + 1] = { id = e, dp = pos }
-            if #batch >= CHUNK then blink.UpdateTransformFull.FireAll(batch); table.clear(batch) end
-        else
-            local last = lastSent[e]
-            if not last then last = pos; lastSent[e] = pos end
-            local d = pos - last
-            if d.Magnitude > 0.01 then
-                lastSent[e] = pos
-                batch[#batch + 1] = { id = e, dp = d }
-                if #batch >= CHUNK then blink.UpdateTransformDelta.FireAll(batch); table.clear(batch) end
+local lastSent:   { [number]: Vector3 } = {}
+local slotOwner:  { [number]: number } = {} -- slot → entity in it now (to re-base a reused slot)
+local scratchPos: { [number]: Vector3 } = {}
+local scratchEnt: { [number]: number } = {}
+local warpFull:  { { id: number, dp: Vector3 } } = {}
+local fullBatch: { { id: number, dp: Vector3 } } = {}
+
+local function sendDeltas()
+    table.clear(scratchPos)
+    table.clear(scratchEnt)
+    table.clear(warpFull)
+
+    local maxSlot = -1
+    for e, transform, slot in streamQuery do
+        scratchPos[slot] = transform.new.Position
+        scratchEnt[slot] = e
+        if slot > maxSlot then maxSlot = slot end
+    end
+    if maxSlot < 0 then return end
+
+    for base = 0, maxSlot, CHUNK do
+        local hi = math.min(base + CHUNK - 1, maxSlot)
+        local deltas = table.create((hi - base + 1) * 3)
+        local di = 0
+        for slot = base, hi do
+            local pos = scratchPos[slot]
+            if pos then
+                -- a recycled slot with a new occupant: re-base so we don't emit a bogus jump
+                if slotOwner[slot] ~= scratchEnt[slot] then
+                    slotOwner[slot] = scratchEnt[slot]
+                    lastSent[slot] = pos
+                end
+                local last = lastSent[slot]
+                local dx, dy, dz = pos.X - last.X, pos.Y - last.Y, pos.Z - last.Z
+                if dx > WARP or dx < -WARP or dy > WARP or dy < -WARP or dz > WARP or dz < -WARP then
+                    -- teleport/edge case i8 can't carry → send an absolute, zero the delta
+                    warpFull[#warpFull + 1] = { id = scratchEnt[slot], dp = pos }
+                    lastSent[slot] = pos
+                    deltas[di + 1] = 0; deltas[di + 2] = 0; deltas[di + 3] = 0
+                else
+                    local qx = math.clamp(math.round(dx * INV_STEP), -127, 127)
+                    local qy = math.clamp(math.round(dy * INV_STEP), -127, 127)
+                    local qz = math.clamp(math.round(dz * INV_STEP), -127, 127)
+                    deltas[di + 1] = qx; deltas[di + 2] = qy; deltas[di + 3] = qz
+                    -- advance by the QUANTIZED amount so the sub-step residual carries forward
+                    lastSent[slot] = Vector3.new(last.X + qx * STEP, last.Y + qy * STEP, last.Z + qz * STEP)
+                end
+            else
+                deltas[di + 1] = 0; deltas[di + 2] = 0; deltas[di + 3] = 0 -- transient slot gap
             end
+            di += 3
         end
+        blink.UpdateTransformDelta.FireAll({ base = base, deltas = deltas })
     end
-    if #batch > 0 then
-        if full then blink.UpdateTransformFull.FireAll(batch) else blink.UpdateTransformDelta.FireAll(batch) end
+
+    if #warpFull > 0 then blink.UpdateTransformFull.FireAll(warpFull); table.clear(warpFull) end
+end
+
+-- periodic absolute snapshot (reliable) → clears accumulated drift + any slot-churn mismatch
+local function sendFull()
+    table.clear(fullBatch)
+    for e, transform, slot in streamQuery do
+        local pos = transform.new.Position
+        lastSent[slot] = pos -- rebase so deltas resume from the corrected position
+        slotOwner[slot] = e
+        fullBatch[#fullBatch + 1] = { id = e, dp = pos }
+        if #fullBatch >= 128 then blink.UpdateTransformFull.FireAll(fullBatch); table.clear(fullBatch) end
     end
+    if #fullBatch > 0 then blink.UpdateTransformFull.FireAll(fullBatch); table.clear(fullBatch) end
 end
 
 -- ── Ticks ──────────────────────────────────────────────────────────────────────
@@ -226,9 +323,11 @@ local function netWrapper(dt: number)
     fullAcc += dt
     if netAcc < NET_TICK then return end
     netAcc = 0
-    local full = fullAcc >= FULL_EVERY
-    if full then fullAcc = 0 end
-    sendStep(full)
+    sendDeltas()
+    if fullAcc >= FULL_EVERY then
+        fullAcc = 0
+        sendFull()
+    end
 end
 
 scheduler.SYSTEM(moveWrapper, phases.AIMovement)

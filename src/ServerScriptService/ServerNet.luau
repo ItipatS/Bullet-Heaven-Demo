@@ -161,124 +161,55 @@ local Queue: any = {
 
 local SerdesEvent = "?"
 local SerdesThread: thread?
-Queue.Reliable[10] = table.create(256)
+Queue.Reliable[12] = table.create(256)
 Queue.Unreliable[2] = table.create(256)
-Queue.Reliable[11] = table.create(256)
 Queue.Reliable[13] = table.create(256)
-Queue.Reliable[16] = table.create(256)
+Queue.Reliable[15] = table.create(256)
+Queue.Reliable[19] = table.create(256)
+Queue.Reliable[20] = table.create(256)
+Queue.Reliable[21] = table.create(256)
 export type state = {[string]: string}
-export type Transform = { id: number, dp: Vector3 }
+export type DeltaChunk = { base: number, deltas: { number } }
 export type TransformFull = { id: number, dp: Vector3 }
 export type MobState = { id: number, state: {[string]: string} }
-export type MobSpawn = { id: number, pos: Vector3, size: number, type: string }
+export type MobSpawn = { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number }
 export type Path = { id: number, from: number, to: number, speed: number, startTime: number }
 export type Chase = { id: number, target: Instance, speed: number }
 export type BubbleFire = { id: number, origin: Vector3, velocity: Vector3, t0: number, life: number, color: Vector3, size: number }
 export type ExpSpawn = { id: number, pos: Vector3, tier: number }
 export type Card = { id: number, title: string, desc: string, kind: number, weapon: string }
 export type StatsMsg = { level: number, xp: number, xpNext: number, hp: number, maxHp: number }
+export type StatSheetMsg = { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }
 export type GameOverMsg = { time: number, level: number }
+export type MobHp = { id: number, hp: number, max: number }
+export type Offer = { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }
+export type ItemMsg = { id: string, level: number }
 export type EffectMsg = { kind: number, pos: Vector3, radius: number, dir: Vector3 }
+export type HazardMsg = { id: number, kind: number, pos: Vector3, radius: number, life: number }
+export type BeamState = { active: number, life: number, width: number, length: number }
 export type PetDrop = { id: number, pos: Vector3, pet: string }
+export type CardDrop = { id: number, pos: Vector3 }
 export type HealthDrop = { id: number, pos: Vector3 }
 export type TixDrop = { id: number, pos: Vector3, amount: number }
 export type ProfileMsg = { tix: number, bestWave: number, bestLevel: number, bestTime: number, totalKills: number, runs: number }
 export type UfoPos = { id: number, pos: Vector3 }
 export type UfoBolt = { origin: Vector3, vel: Vector3, t0: number, life: number }
-export type UfoBeamMsg = { id: number, target: Vector3 }
-function SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value: { { id: number, dp: Vector3 } }): ()
-	-- Allocate BLOCK: 3 bytes
-	local BLOCK_START = Allocate(3)
+export type UfoBeamMsg = { id: number, target: Vector3, charging: number }
+function SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value: { base: number, deltas: { number } }): ()
+	-- Allocate BLOCK: 5 bytes
+	local BLOCK_START = Allocate(5)
 	buffer.writeu8(SendBuffer, BLOCK_START + 0, 0)
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value.base)
 	-- START ARRAY
-	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
-		-- Allocate BLOCK: 10 bytes
-	local ARRAY_START_1 = Allocate(10 * #Value)
-	for Index = 1, #Value do
-		local Item_1 = Value[Index]
-		-- Allocate 4
+	buffer.writeu16(SendBuffer, BLOCK_START + 3, #Value.deltas)
+		-- Allocate BLOCK: 1 bytes
+	local ARRAY_START_1 = Allocate(1 * #Value.deltas)
+	for Index = 1, #Value.deltas do
+		local Item_1 = Value.deltas[Index]
+		-- Allocate 1
 		local OPERATION_OFFSET_0 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
-		local Vector = Item_1.dp
-		-- Allocate 2
-		local OPERATION_OFFSET_1 = ARRAY_START_1
-		ARRAY_START_1 += 2
-		if Vector.X > 65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b0_11111_0000000000)
-		elseif Vector.X < -65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000000)
-		elseif Vector.X ~= Vector.X then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000001)
-		elseif Vector.X == 0 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0)
-		else
-			local float = Vector.X
-			local Abosulte = math.abs(float)
-			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
-			local RoundedValue = (Abosulte // Interval) * Interval
-			local Fraction, Exponent = math.frexp(RoundedValue)
-			Exponent += 14
-			local Mantissa = math.round(if Exponent <= 0
-				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
-				else Fraction * 0x800) % 0x400
-			local Result = Mantissa
-				+ math.max(Exponent, 0) * 0x400
-				+ if float < 0 then 0x8000 else 0
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, Result)
-		end
-		-- Allocate 2
-		local OPERATION_OFFSET_2 = ARRAY_START_1
-		ARRAY_START_1 += 2
-		if Vector.Y > 65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b0_11111_0000000000)
-		elseif Vector.Y < -65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000000)
-		elseif Vector.Y ~= Vector.Y then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000001)
-		elseif Vector.Y == 0 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0)
-		else
-			local float = Vector.Y
-			local Abosulte = math.abs(float)
-			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
-			local RoundedValue = (Abosulte // Interval) * Interval
-			local Fraction, Exponent = math.frexp(RoundedValue)
-			Exponent += 14
-			local Mantissa = math.round(if Exponent <= 0
-				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
-				else Fraction * 0x800) % 0x400
-			local Result = Mantissa
-				+ math.max(Exponent, 0) * 0x400
-				+ if float < 0 then 0x8000 else 0
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, Result)
-		end
-		-- Allocate 2
-		local OPERATION_OFFSET_3 = ARRAY_START_1
-		ARRAY_START_1 += 2
-		if Vector.Z > 65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b0_11111_0000000000)
-		elseif Vector.Z < -65504 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000000)
-		elseif Vector.Z ~= Vector.Z then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000001)
-		elseif Vector.Z == 0 then
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0)
-		else
-			local float = Vector.Z
-			local Abosulte = math.abs(float)
-			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
-			local RoundedValue = (Abosulte // Interval) * Interval
-			local Fraction, Exponent = math.frexp(RoundedValue)
-			Exponent += 14
-			local Mantissa = math.round(if Exponent <= 0
-				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
-				else Fraction * 0x800) % 0x400
-			local Result = Mantissa
-				+ math.max(Exponent, 0) * 0x400
-				+ if float < 0 then 0x8000 else 0
-			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, Result)
-		end
+		ARRAY_START_1 += 1
+		buffer.writei8(SendBuffer, OPERATION_OFFSET_0, Item_1)
 	end
 	-- END ARRAY
 end
@@ -314,44 +245,52 @@ function SerdesFunctions.WriteEVENT_UpdateTransformFull(Value: { { id: number, d
 	-- END ARRAY
 end
 
-function SerdesFunctions.WriteEVENT_Spawn(Value: { { id: number, pos: Vector3, size: number, type: string } }): ()
+function SerdesFunctions.WriteEVENT_Spawn(Value: { { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
 	buffer.writeu8(SendBuffer, BLOCK_START + 0, 1)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
-		-- Allocate BLOCK: 34 bytes
-	local ARRAY_START_1 = Allocate(34 * #Value)
+		-- Allocate BLOCK: 37 bytes
+	local ARRAY_START_1 = Allocate(37 * #Value)
 	for Index = 1, #Value do
 		local Item_1 = Value[Index]
 		-- Allocate 4
 		local OPERATION_OFFSET_0 = ARRAY_START_1
 		ARRAY_START_1 += 4
 		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
-		local Vector = Item_1.pos
-		-- Allocate 8
+		-- Allocate 2
 		local OPERATION_OFFSET_1 = ARRAY_START_1
-		ARRAY_START_1 += 8
-		buffer.writef64(SendBuffer, OPERATION_OFFSET_1, Vector.X)
+		ARRAY_START_1 += 2
+		buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, Item_1.slot)
+		local Vector = Item_1.pos
 		-- Allocate 8
 		local OPERATION_OFFSET_2 = ARRAY_START_1
 		ARRAY_START_1 += 8
-		buffer.writef64(SendBuffer, OPERATION_OFFSET_2, Vector.Y)
+		buffer.writef64(SendBuffer, OPERATION_OFFSET_2, Vector.X)
 		-- Allocate 8
 		local OPERATION_OFFSET_3 = ARRAY_START_1
 		ARRAY_START_1 += 8
-		buffer.writef64(SendBuffer, OPERATION_OFFSET_3, Vector.Z)
-		-- Allocate 4
+		buffer.writef64(SendBuffer, OPERATION_OFFSET_3, Vector.Y)
+		-- Allocate 8
 		local OPERATION_OFFSET_4 = ARRAY_START_1
+		ARRAY_START_1 += 8
+		buffer.writef64(SendBuffer, OPERATION_OFFSET_4, Vector.Z)
+		-- Allocate 4
+		local OPERATION_OFFSET_5 = ARRAY_START_1
 		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_4, Item_1.size)
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_5, Item_1.size)
 		local Length = #Item_1.type
 		-- Allocate 2
-		local OPERATION_OFFSET_5 = ARRAY_START_1
+		local OPERATION_OFFSET_6 = ARRAY_START_1
 		ARRAY_START_1 += 2
-		buffer.writeu16(SendBuffer, OPERATION_OFFSET_5, Length)
+		buffer.writeu16(SendBuffer, OPERATION_OFFSET_6, Length)
 		Allocate(Length)
 		buffer.writestring(SendBuffer, SendOffset, Item_1.type, Length)
+		-- Allocate 1
+		local OPERATION_OFFSET_7 = ARRAY_START_1
+		ARRAY_START_1 += 1
+		buffer.writeu8(SendBuffer, OPERATION_OFFSET_7, Item_1.tier)
 	end
 	-- END ARRAY
 end
@@ -449,10 +388,55 @@ function SerdesFunctions.WriteEVENT_UpdateMobChase(Value: { { id: number, target
 	-- END ARRAY
 end
 
+function SerdesFunctions.WriteEVENT_StatSheet(Value: { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }): ()
+	-- Allocate BLOCK: 51 bytes
+	local BLOCK_START = Allocate(51)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 5)
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value.maxHp)
+	buffer.writef32(SendBuffer, BLOCK_START + 3, Value.hpRegen)
+	buffer.writef32(SendBuffer, BLOCK_START + 7, Value.atk)
+	buffer.writef32(SendBuffer, BLOCK_START + 11, Value.walkSpeed)
+	buffer.writef32(SendBuffer, BLOCK_START + 15, Value.crit)
+	buffer.writef32(SendBuffer, BLOCK_START + 19, Value.critDmg)
+	buffer.writef32(SendBuffer, BLOCK_START + 23, Value.pickup)
+	buffer.writef32(SendBuffer, BLOCK_START + 27, Value.haste)
+	buffer.writef32(SendBuffer, BLOCK_START + 31, Value.expMult)
+	buffer.writef32(SendBuffer, BLOCK_START + 35, Value.tixRate)
+	buffer.writef32(SendBuffer, BLOCK_START + 39, Value.atkSize)
+	buffer.writef32(SendBuffer, BLOCK_START + 43, Value.knock)
+	buffer.writef32(SendBuffer, BLOCK_START + 47, Value.skillCd)
+end
+
+function SerdesFunctions.WriteEVENT_MobHealth(Value: { { id: number, hp: number, max: number } }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 6)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 8 bytes
+	local ARRAY_START_1 = Allocate(8 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		-- Allocate 4
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
+		-- Allocate 2
+		local OPERATION_OFFSET_1 = ARRAY_START_1
+		ARRAY_START_1 += 2
+		buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, Item_1.hp)
+		-- Allocate 2
+		local OPERATION_OFFSET_2 = ARRAY_START_1
+		ARRAY_START_1 += 2
+		buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, Item_1.max)
+	end
+	-- END ARRAY
+end
+
 function SerdesFunctions.WriteEVENT_Death(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 5)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 7)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -470,7 +454,7 @@ end
 function SerdesFunctions.WriteEVENT_FireBubble(Value: { { id: number, origin: Vector3, velocity: Vector3, t0: number, life: number, color: Vector3, size: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 6)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 8)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 56 bytes
@@ -557,7 +541,7 @@ end
 function SerdesFunctions.WriteEVENT_SpawnExp(Value: { { id: number, pos: Vector3, tier: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 7)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 9)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 17 bytes
@@ -592,7 +576,7 @@ end
 function SerdesFunctions.WriteEVENT_RemoveExp(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 8)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 10)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -607,16 +591,17 @@ function SerdesFunctions.WriteEVENT_RemoveExp(Value: { number }): ()
 	-- END ARRAY
 end
 
-function SerdesFunctions.WriteEVENT_LevelUp(Value: { { id: number, title: string, desc: string, kind: number, weapon: string } }): ()
-	-- Allocate BLOCK: 3 bytes
-	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 9)
+function SerdesFunctions.WriteEVENT_LevelUp(Value: { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }): ()
+	-- Allocate BLOCK: 4 bytes
+	local BLOCK_START = Allocate(4)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 11)
+	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value.source)
 	-- START ARRAY
-	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+	buffer.writeu16(SendBuffer, BLOCK_START + 2, #Value.cards)
 		-- Allocate BLOCK: 8 bytes
-	local ARRAY_START_1 = Allocate(8 * #Value)
-	for Index = 1, #Value do
-		local Item_1 = Value[Index]
+	local ARRAY_START_1 = Allocate(8 * #Value.cards)
+	for Index = 1, #Value.cards do
+		local Item_1 = Value.cards[Index]
 		-- Allocate 1
 		local OPERATION_OFFSET_0 = ARRAY_START_1
 		ARRAY_START_1 += 1
@@ -677,7 +662,7 @@ end
 function SerdesFunctions.WriteEVENT_GameOver(Value: { time: number, level: number }): ()
 	-- Allocate BLOCK: 7 bytes
 	local BLOCK_START = Allocate(7)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 12)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 14)
 	buffer.writef32(SendBuffer, BLOCK_START + 1, Value.time)
 	buffer.writeu16(SendBuffer, BLOCK_START + 5, Value.level)
 end
@@ -689,10 +674,17 @@ function SerdesFunctions.ReadEVENT_Restart(): (number)
 	return Value
 end
 
+function SerdesFunctions.WriteEVENT_RoundOver(Value: number): ()
+	-- Allocate BLOCK: 2 bytes
+	local BLOCK_START = Allocate(2)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 16)
+	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value)
+end
+
 function SerdesFunctions.WriteEVENT_Weapons(Value: { string }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 14)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 17)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 2 bytes
@@ -713,7 +705,7 @@ end
 function SerdesFunctions.WriteEVENT_Unlocked(Value: { string }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 15)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 18)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 2 bytes
@@ -753,10 +745,58 @@ function SerdesFunctions.ReadEVENT_SwitchWeapons(): ({ string })
 	return Value
 end
 
+function SerdesFunctions.ReadEVENT_SetMain(): (string)
+	-- Read BLOCK: 2 bytes
+	local BLOCK_START = Read(2)
+	local Length = buffer.readu16(RecieveBuffer, BLOCK_START + 0)
+	local Value = buffer.readstring(RecieveBuffer, Read(Length), Length)
+	return Value
+end
+
+function SerdesFunctions.ReadEVENT_BuyPet(): (string)
+	-- Read BLOCK: 2 bytes
+	local BLOCK_START = Read(2)
+	local Length = buffer.readu16(RecieveBuffer, BLOCK_START + 0)
+	local Value = buffer.readstring(RecieveBuffer, Read(Length), Length)
+	return Value
+end
+
+function SerdesFunctions.WriteEVENT_Items(Value: { { id: string, level: number } }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 22)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 3 bytes
+	local ARRAY_START_1 = Allocate(3 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		local Length = #Item_1.id
+		-- Allocate 2
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 2
+		buffer.writeu16(SendBuffer, OPERATION_OFFSET_0, Length)
+		Allocate(Length)
+		buffer.writestring(SendBuffer, SendOffset, Item_1.id, Length)
+		-- Allocate 1
+		local OPERATION_OFFSET_1 = ARRAY_START_1
+		ARRAY_START_1 += 1
+		buffer.writeu8(SendBuffer, OPERATION_OFFSET_1, Item_1.level)
+	end
+	-- END ARRAY
+end
+
+function SerdesFunctions.WriteEVENT_MainWeapon(Value: number): ()
+	-- Allocate BLOCK: 2 bytes
+	local BLOCK_START = Allocate(2)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 23)
+	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value)
+end
+
 function SerdesFunctions.WriteEVENT_Effect(Value: { { kind: number, pos: Vector3, radius: number, dir: Vector3 } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 17)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 24)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 29 bytes
@@ -801,17 +841,88 @@ function SerdesFunctions.WriteEVENT_Effect(Value: { { kind: number, pos: Vector3
 	-- END ARRAY
 end
 
+function SerdesFunctions.WriteEVENT_HazardSpawn(Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 25)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 25 bytes
+	local ARRAY_START_1 = Allocate(25 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		-- Allocate 4
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
+		-- Allocate 1
+		local OPERATION_OFFSET_1 = ARRAY_START_1
+		ARRAY_START_1 += 1
+		buffer.writeu8(SendBuffer, OPERATION_OFFSET_1, Item_1.kind)
+		local Vector = Item_1.pos
+		-- Allocate 4
+		local OPERATION_OFFSET_2 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_2, Vector.X)
+		-- Allocate 4
+		local OPERATION_OFFSET_3 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_3, Vector.Y)
+		-- Allocate 4
+		local OPERATION_OFFSET_4 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_4, Vector.Z)
+		-- Allocate 4
+		local OPERATION_OFFSET_5 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_5, Item_1.radius)
+		-- Allocate 4
+		local OPERATION_OFFSET_6 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_6, Item_1.life)
+	end
+	-- END ARRAY
+end
+
+function SerdesFunctions.WriteEVENT_HazardRemove(Value: { number }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 26)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 4 bytes
+	local ARRAY_START_1 = Allocate(4 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		-- Allocate 4
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1)
+	end
+	-- END ARRAY
+end
+
+function SerdesFunctions.WriteEVENT_UltBeam(Value: { active: number, life: number, width: number, length: number }): ()
+	-- Allocate BLOCK: 14 bytes
+	local BLOCK_START = Allocate(14)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 27)
+	buffer.writeu8(SendBuffer, BLOCK_START + 1, Value.active)
+	buffer.writef32(SendBuffer, BLOCK_START + 2, Value.life)
+	buffer.writef32(SendBuffer, BLOCK_START + 6, Value.width)
+	buffer.writef32(SendBuffer, BLOCK_START + 10, Value.length)
+end
+
 function SerdesFunctions.WriteEVENT_WaveStart(Value: number): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 18)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 28)
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Stats(Value: { level: number, xp: number, xpNext: number, hp: number, maxHp: number }): ()
 	-- Allocate BLOCK: 15 bytes
 	local BLOCK_START = Allocate(15)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 19)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 29)
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Value.level)
 	buffer.writeu32(SendBuffer, BLOCK_START + 3, Value.xp)
 	buffer.writeu32(SendBuffer, BLOCK_START + 7, Value.xpNext)
@@ -840,7 +951,7 @@ end
 function SerdesFunctions.WriteEVENT_Toast(Value: string): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 20)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 30)
 	local Length = #Value
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, Length)
 	Allocate(Length)
@@ -850,7 +961,7 @@ end
 function SerdesFunctions.WriteEVENT_PetDropSpawn(Value: { { id: number, pos: Vector3, pet: string } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 21)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 31)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 18 bytes
@@ -888,7 +999,56 @@ end
 function SerdesFunctions.WriteEVENT_PetDropRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 22)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 32)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 4 bytes
+	local ARRAY_START_1 = Allocate(4 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		-- Allocate 4
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1)
+	end
+	-- END ARRAY
+end
+
+function SerdesFunctions.WriteEVENT_CardDropSpawn(Value: { { id: number, pos: Vector3 } }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 33)
+	-- START ARRAY
+	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
+		-- Allocate BLOCK: 16 bytes
+	local ARRAY_START_1 = Allocate(16 * #Value)
+	for Index = 1, #Value do
+		local Item_1 = Value[Index]
+		-- Allocate 4
+		local OPERATION_OFFSET_0 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
+		local Vector = Item_1.pos
+		-- Allocate 4
+		local OPERATION_OFFSET_1 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_1, Vector.X)
+		-- Allocate 4
+		local OPERATION_OFFSET_2 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_2, Vector.Y)
+		-- Allocate 4
+		local OPERATION_OFFSET_3 = ARRAY_START_1
+		ARRAY_START_1 += 4
+		buffer.writef32(SendBuffer, OPERATION_OFFSET_3, Vector.Z)
+	end
+	-- END ARRAY
+end
+
+function SerdesFunctions.WriteEVENT_CardDropRemove(Value: { number }): ()
+	-- Allocate BLOCK: 3 bytes
+	local BLOCK_START = Allocate(3)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 34)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -906,7 +1066,7 @@ end
 function SerdesFunctions.WriteEVENT_HealthSpawn(Value: { { id: number, pos: Vector3 } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 23)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 35)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 16 bytes
@@ -937,7 +1097,7 @@ end
 function SerdesFunctions.WriteEVENT_HealthRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 24)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 36)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -955,7 +1115,7 @@ end
 function SerdesFunctions.WriteEVENT_TixSpawn(Value: { { id: number, pos: Vector3, amount: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 25)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 37)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 20 bytes
@@ -990,7 +1150,7 @@ end
 function SerdesFunctions.WriteEVENT_TixRemove(Value: { number }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 26)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 38)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 4 bytes
@@ -1008,14 +1168,14 @@ end
 function SerdesFunctions.WriteEVENT_TixCount(Value: number): ()
 	-- Allocate BLOCK: 5 bytes
 	local BLOCK_START = Allocate(5)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 27)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 39)
 	buffer.writeu32(SendBuffer, BLOCK_START + 1, Value)
 end
 
 function SerdesFunctions.WriteEVENT_Profile(Value: { tix: number, bestWave: number, bestLevel: number, bestTime: number, totalKills: number, runs: number }): ()
 	-- Allocate BLOCK: 21 bytes
 	local BLOCK_START = Allocate(21)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 28)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 40)
 	buffer.writeu32(SendBuffer, BLOCK_START + 1, Value.tix)
 	buffer.writeu16(SendBuffer, BLOCK_START + 5, Value.bestWave)
 	buffer.writeu16(SendBuffer, BLOCK_START + 7, Value.bestLevel)
@@ -1030,8 +1190,8 @@ function SerdesFunctions.WriteEVENT_UfoMove(Value: { { id: number, pos: Vector3 
 	buffer.writeu8(SendBuffer, BLOCK_START + 0, 4)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
-		-- Allocate BLOCK: 16 bytes
-	local ARRAY_START_1 = Allocate(16 * #Value)
+		-- Allocate BLOCK: 10 bytes
+	local ARRAY_START_1 = Allocate(10 * #Value)
 	for Index = 1, #Value do
 		local Item_1 = Value[Index]
 		-- Allocate 4
@@ -1039,18 +1199,84 @@ function SerdesFunctions.WriteEVENT_UfoMove(Value: { { id: number, pos: Vector3 
 		ARRAY_START_1 += 4
 		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
 		local Vector = Item_1.pos
-		-- Allocate 4
+		-- Allocate 2
 		local OPERATION_OFFSET_1 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_1, Vector.X)
-		-- Allocate 4
+		ARRAY_START_1 += 2
+		if Vector.X > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b0_11111_0000000000)
+		elseif Vector.X < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000000)
+		elseif Vector.X ~= Vector.X then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000001)
+		elseif Vector.X == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0)
+		else
+			local float = Vector.X
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, Result)
+		end
+		-- Allocate 2
 		local OPERATION_OFFSET_2 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_2, Vector.Y)
-		-- Allocate 4
+		ARRAY_START_1 += 2
+		if Vector.Y > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b0_11111_0000000000)
+		elseif Vector.Y < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000000)
+		elseif Vector.Y ~= Vector.Y then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000001)
+		elseif Vector.Y == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0)
+		else
+			local float = Vector.Y
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, Result)
+		end
+		-- Allocate 2
 		local OPERATION_OFFSET_3 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_3, Vector.Z)
+		ARRAY_START_1 += 2
+		if Vector.Z > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b0_11111_0000000000)
+		elseif Vector.Z < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000000)
+		elseif Vector.Z ~= Vector.Z then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000001)
+		elseif Vector.Z == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0)
+		else
+			local float = Vector.Z
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, Result)
+		end
 	end
 	-- END ARRAY
 end
@@ -1058,7 +1284,7 @@ end
 function SerdesFunctions.WriteEVENT_UfoFire(Value: { { origin: Vector3, vel: Vector3, t0: number, life: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
-	buffer.writeu8(SendBuffer, BLOCK_START + 0, 29)
+	buffer.writeu8(SendBuffer, BLOCK_START + 0, 41)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
 		-- Allocate BLOCK: 36 bytes
@@ -1103,14 +1329,14 @@ function SerdesFunctions.WriteEVENT_UfoFire(Value: { { origin: Vector3, vel: Vec
 	-- END ARRAY
 end
 
-function SerdesFunctions.WriteEVENT_UfoBeam(Value: { { id: number, target: Vector3 } }): ()
+function SerdesFunctions.WriteEVENT_UfoBeam(Value: { { id: number, target: Vector3, charging: number } }): ()
 	-- Allocate BLOCK: 3 bytes
 	local BLOCK_START = Allocate(3)
 	buffer.writeu8(SendBuffer, BLOCK_START + 0, 5)
 	-- START ARRAY
 	buffer.writeu16(SendBuffer, BLOCK_START + 1, #Value)
-		-- Allocate BLOCK: 16 bytes
-	local ARRAY_START_1 = Allocate(16 * #Value)
+		-- Allocate BLOCK: 11 bytes
+	local ARRAY_START_1 = Allocate(11 * #Value)
 	for Index = 1, #Value do
 		local Item_1 = Value[Index]
 		-- Allocate 4
@@ -1118,18 +1344,88 @@ function SerdesFunctions.WriteEVENT_UfoBeam(Value: { { id: number, target: Vecto
 		ARRAY_START_1 += 4
 		buffer.writeu32(SendBuffer, OPERATION_OFFSET_0, Item_1.id)
 		local Vector = Item_1.target
-		-- Allocate 4
+		-- Allocate 2
 		local OPERATION_OFFSET_1 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_1, Vector.X)
-		-- Allocate 4
+		ARRAY_START_1 += 2
+		if Vector.X > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b0_11111_0000000000)
+		elseif Vector.X < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000000)
+		elseif Vector.X ~= Vector.X then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0b1_11111_0000000001)
+		elseif Vector.X == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, 0)
+		else
+			local float = Vector.X
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_1, Result)
+		end
+		-- Allocate 2
 		local OPERATION_OFFSET_2 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_2, Vector.Y)
-		-- Allocate 4
+		ARRAY_START_1 += 2
+		if Vector.Y > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b0_11111_0000000000)
+		elseif Vector.Y < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000000)
+		elseif Vector.Y ~= Vector.Y then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0b1_11111_0000000001)
+		elseif Vector.Y == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, 0)
+		else
+			local float = Vector.Y
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_2, Result)
+		end
+		-- Allocate 2
 		local OPERATION_OFFSET_3 = ARRAY_START_1
-		ARRAY_START_1 += 4
-		buffer.writef32(SendBuffer, OPERATION_OFFSET_3, Vector.Z)
+		ARRAY_START_1 += 2
+		if Vector.Z > 65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b0_11111_0000000000)
+		elseif Vector.Z < -65504 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000000)
+		elseif Vector.Z ~= Vector.Z then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0b1_11111_0000000001)
+		elseif Vector.Z == 0 then
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, 0)
+		else
+			local float = Vector.Z
+			local Abosulte = math.abs(float)
+			local Interval = math.ldexp(1, math.floor(math.log(Abosulte, 2)) - 10)
+			local RoundedValue = (Abosulte // Interval) * Interval
+			local Fraction, Exponent = math.frexp(RoundedValue)
+			Exponent += 14
+			local Mantissa = math.round(if Exponent <= 0
+				then Fraction * 0x400 / math.ldexp(1, math.abs(Exponent))
+				else Fraction * 0x800) % 0x400
+			local Result = Mantissa
+				+ math.max(Exponent, 0) * 0x400
+				+ if float < 0 then 0x8000 else 0
+			buffer.writeu16(SendBuffer, OPERATION_OFFSET_3, Result)
+		end
+		-- Allocate 1
+		local OPERATION_OFFSET_4 = ARRAY_START_1
+		ARRAY_START_1 += 1
+		buffer.writeu8(SendBuffer, OPERATION_OFFSET_4, Item_1.charging)
 	end
 	-- END ARRAY
 end
@@ -1168,6 +1464,18 @@ if not RunService:IsRunning() then
 		FireExcept = NOOP
 	},
 	UpdateMobChase = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	StatSheet = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	MobHealth = {
 		Fire = NOOP,
 		FireAll = NOOP,
 		FireList = NOOP,
@@ -1227,6 +1535,12 @@ if not RunService:IsRunning() then
 	Restart = {
 		On = NOOP
 	},
+	RoundOver = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
 	Weapons = {
 		Fire = NOOP,
 		FireAll = NOOP,
@@ -1242,7 +1556,43 @@ if not RunService:IsRunning() then
 	SwitchWeapons = {
 		On = NOOP
 	},
+	SetMain = {
+		On = NOOP
+	},
+	BuyPet = {
+		On = NOOP
+	},
+	Items = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	MainWeapon = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
 	Effect = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	HazardSpawn = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	HazardRemove = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	UltBeam = {
 		Fire = NOOP,
 		FireAll = NOOP,
 		FireList = NOOP,
@@ -1279,6 +1629,18 @@ if not RunService:IsRunning() then
 		FireExcept = NOOP
 	},
 	PetDropRemove = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	CardDropSpawn = {
+		Fire = NOOP,
+		FireAll = NOOP,
+		FireList = NOOP,
+		FireExcept = NOOP
+	},
+	CardDropRemove = {
 		Fire = NOOP,
 		FireAll = NOOP,
 		FireList = NOOP,
@@ -1400,49 +1762,71 @@ Reliable.OnServerEvent:Connect(function(Player: Player, Buffer: buffer, Instance
 		-- Read BLOCK: 1 bytes
 		local BLOCK_START = Read(1)
 		local Index = buffer.readu8(RecieveBuffer, BLOCK_START + 0)
-		if Index == 10 then
+		if Index == 12 then
 			local Value: number = SerdesFunctions.ReadEVENT_ChooseCard()
-			if Events.Reliable[10] ~= nil then
+			if Events.Reliable[12] ~= nil then
 				SerdesEvent = "ChooseCard"
-				Events.Reliable[10](Player, Value)
+				Events.Reliable[12](Player, Value)
 			else
-				if #Queue.Reliable[10] > 256 then
+				if #Queue.Reliable[12] > 256 then
 					warn("[Blink]: Event queue of \"ChooseCard\" exceeded 256, did you forget to implement a listener?")
 				end
-				table.insert(Queue.Reliable[10], {Player, Value} :: {any})
-			end
-		elseif Index == 11 then
-			local Value: number = SerdesFunctions.ReadEVENT_UseSkill()
-			if Events.Reliable[11] ~= nil then
-				SerdesEvent = "UseSkill"
-				Events.Reliable[11](Player, Value)
-			else
-				if #Queue.Reliable[11] > 256 then
-					warn("[Blink]: Event queue of \"UseSkill\" exceeded 256, did you forget to implement a listener?")
-				end
-				table.insert(Queue.Reliable[11], {Player, Value} :: {any})
+				table.insert(Queue.Reliable[12], {Player, Value} :: {any})
 			end
 		elseif Index == 13 then
-			local Value: number = SerdesFunctions.ReadEVENT_Restart()
+			local Value: number = SerdesFunctions.ReadEVENT_UseSkill()
 			if Events.Reliable[13] ~= nil then
-				SerdesEvent = "Restart"
+				SerdesEvent = "UseSkill"
 				Events.Reliable[13](Player, Value)
 			else
 				if #Queue.Reliable[13] > 256 then
-					warn("[Blink]: Event queue of \"Restart\" exceeded 256, did you forget to implement a listener?")
+					warn("[Blink]: Event queue of \"UseSkill\" exceeded 256, did you forget to implement a listener?")
 				end
 				table.insert(Queue.Reliable[13], {Player, Value} :: {any})
 			end
-		elseif Index == 16 then
-			local Value: { string } = SerdesFunctions.ReadEVENT_SwitchWeapons()
-			if Events.Reliable[16] ~= nil then
-				SerdesEvent = "SwitchWeapons"
-				Events.Reliable[16](Player, Value)
+		elseif Index == 15 then
+			local Value: number = SerdesFunctions.ReadEVENT_Restart()
+			if Events.Reliable[15] ~= nil then
+				SerdesEvent = "Restart"
+				Events.Reliable[15](Player, Value)
 			else
-				if #Queue.Reliable[16] > 256 then
+				if #Queue.Reliable[15] > 256 then
+					warn("[Blink]: Event queue of \"Restart\" exceeded 256, did you forget to implement a listener?")
+				end
+				table.insert(Queue.Reliable[15], {Player, Value} :: {any})
+			end
+		elseif Index == 19 then
+			local Value: { string } = SerdesFunctions.ReadEVENT_SwitchWeapons()
+			if Events.Reliable[19] ~= nil then
+				SerdesEvent = "SwitchWeapons"
+				Events.Reliable[19](Player, Value)
+			else
+				if #Queue.Reliable[19] > 256 then
 					warn("[Blink]: Event queue of \"SwitchWeapons\" exceeded 256, did you forget to implement a listener?")
 				end
-				table.insert(Queue.Reliable[16], {Player, Value} :: {any})
+				table.insert(Queue.Reliable[19], {Player, Value} :: {any})
+			end
+		elseif Index == 20 then
+			local Value: string = SerdesFunctions.ReadEVENT_SetMain()
+			if Events.Reliable[20] ~= nil then
+				SerdesEvent = "SetMain"
+				Events.Reliable[20](Player, Value)
+			else
+				if #Queue.Reliable[20] > 256 then
+					warn("[Blink]: Event queue of \"SetMain\" exceeded 256, did you forget to implement a listener?")
+				end
+				table.insert(Queue.Reliable[20], {Player, Value} :: {any})
+			end
+		elseif Index == 21 then
+			local Value: string = SerdesFunctions.ReadEVENT_BuyPet()
+			if Events.Reliable[21] ~= nil then
+				SerdesEvent = "BuyPet"
+				Events.Reliable[21](Player, Value)
+			else
+				if #Queue.Reliable[21] > 256 then
+					warn("[Blink]: Event queue of \"BuyPet\" exceeded 256, did you forget to implement a listener?")
+				end
+				table.insert(Queue.Reliable[21], {Player, Value} :: {any})
 			end
 		end
 	end
@@ -1477,21 +1861,21 @@ local Returns = table.freeze({
 	StepReplication = StepReplication,
 
 	UpdateTransformDelta = {
-		Fire = function(Player: Player, Value: { { id: number, dp: Vector3 } }): ()
+		Fire = function(Player: Player, Value: { base: number, deltas: { number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value)
 			local Buffer = buffer.create(SendCursor)
 			buffer.copy(Buffer, 0, SendBuffer, 0, SendCursor)
 			Unreliable:FireClient(Player, Buffer, SendInstances)
 		end,
-		FireAll = function(Value: { { id: number, dp: Vector3 } }): ()
+		FireAll = function(Value: { base: number, deltas: { number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value)
 			local Buffer = buffer.create(SendCursor)
 			buffer.copy(Buffer, 0, SendBuffer, 0, SendCursor)
 			Unreliable:FireAllClients(Buffer, SendInstances)
 		end,
-		FireList = function(List: {Player}, Value: { { id: number, dp: Vector3 } }): ()
+		FireList = function(List: {Player}, Value: { base: number, deltas: { number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value)
 			local Buffer = buffer.create(SendCursor)
@@ -1500,7 +1884,7 @@ local Returns = table.freeze({
 				Unreliable:FireClient(Player, Buffer, SendInstances)
 			end
 		end,
-		FireExcept = function(Except: Player, Value: { { id: number, dp: Vector3 } }): ()
+		FireExcept = function(Except: Player, Value: { base: number, deltas: { number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UpdateTransformDelta(Value)
 			local Buffer = buffer.create(SendCursor)
@@ -1560,12 +1944,12 @@ local Returns = table.freeze({
 		end,
 	},
 	Spawn = {
-		Fire = function(Player: Player, Value: { { id: number, pos: Vector3, size: number, type: string } }): ()
+		Fire = function(Player: Player, Value: { { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number } }): ()
 			Load(PlayersMap[Player])
 			SerdesFunctions.WriteEVENT_Spawn(Value)
 			PlayersMap[Player] = Save()
 		end,
-		FireAll = function(Value: { { id: number, pos: Vector3, size: number, type: string } }): ()
+		FireAll = function(Value: { { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_Spawn(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -1577,7 +1961,7 @@ local Returns = table.freeze({
 				PlayersMap[Player] = Save()
 			end
 		end,
-		FireList = function(List: {Player}, Value: { { id: number, pos: Vector3, size: number, type: string } }): ()
+		FireList = function(List: {Player}, Value: { { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_Spawn(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -1589,7 +1973,7 @@ local Returns = table.freeze({
 				PlayersMap[Player] = Save()
 			end
 		end,
-		FireExcept = function(Except: Player, Value: { { id: number, pos: Vector3, size: number, type: string } }): ()
+		FireExcept = function(Except: Player, Value: { { id: number, slot: number, pos: Vector3, size: number, type: string, tier: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_Spawn(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -1730,6 +2114,98 @@ local Returns = table.freeze({
 		FireExcept = function(Except: Player, Value: { { id: number, target: Instance, speed: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UpdateMobChase(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	StatSheet = {
+		Fire = function(Player: Player, Value: { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_StatSheet(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_StatSheet(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_StatSheet(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { maxHp: number, hpRegen: number, atk: number, walkSpeed: number, crit: number, critDmg: number, pickup: number, haste: number, expMult: number, tixRate: number, atkSize: number, knock: number, skillCd: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_StatSheet(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	MobHealth = {
+		Fire = function(Player: Player, Value: { { id: number, hp: number, max: number } }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_MobHealth(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { { id: number, hp: number, max: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MobHealth(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { { id: number, hp: number, max: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MobHealth(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { { id: number, hp: number, max: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MobHealth(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
 			for _, Player in Players:GetPlayers() do
 				if Player == Except then
@@ -1965,12 +2441,12 @@ local Returns = table.freeze({
 		end,
 	},
 	LevelUp = {
-		Fire = function(Player: Player, Value: { { id: number, title: string, desc: string, kind: number, weapon: string } }): ()
+		Fire = function(Player: Player, Value: { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }): ()
 			Load(PlayersMap[Player])
 			SerdesFunctions.WriteEVENT_LevelUp(Value)
 			PlayersMap[Player] = Save()
 		end,
-		FireAll = function(Value: { { id: number, title: string, desc: string, kind: number, weapon: string } }): ()
+		FireAll = function(Value: { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_LevelUp(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -1982,7 +2458,7 @@ local Returns = table.freeze({
 				PlayersMap[Player] = Save()
 			end
 		end,
-		FireList = function(List: {Player}, Value: { { id: number, title: string, desc: string, kind: number, weapon: string } }): ()
+		FireList = function(List: {Player}, Value: { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_LevelUp(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -1994,7 +2470,7 @@ local Returns = table.freeze({
 				PlayersMap[Player] = Save()
 			end
 		end,
-		FireExcept = function(Except: Player, Value: { { id: number, title: string, desc: string, kind: number, weapon: string } }): ()
+		FireExcept = function(Except: Player, Value: { source: number, cards: { { id: number, title: string, desc: string, kind: number, weapon: string } } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_LevelUp(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
@@ -2012,14 +2488,14 @@ local Returns = table.freeze({
 	},
 	ChooseCard = {
 		On = function(Listener: (Player: Player, Value: number) -> ()): () -> ()
-			Events.Reliable[10] = Listener
-			for Index, Arguments in Queue.Reliable[10] do
+			Events.Reliable[12] = Listener
+			for Index, Arguments in Queue.Reliable[12] do
 				Listener(table.unpack(Arguments))
 			end
-			Queue.Reliable[10] = {}
+			Queue.Reliable[12] = {}
 			return function (): ()
-				if Events.Reliable[10] == Listener then
-					Events.Reliable[10] = nil
+				if Events.Reliable[12] == Listener then
+					Events.Reliable[12] = nil
 				end
 			end
 		end
@@ -2036,14 +2512,14 @@ local Returns = table.freeze({
 	},
 	UseSkill = {
 		On = function(Listener: (Player: Player, Value: number) -> ()): () -> ()
-			Events.Reliable[11] = Listener
-			for Index, Arguments in Queue.Reliable[11] do
+			Events.Reliable[13] = Listener
+			for Index, Arguments in Queue.Reliable[13] do
 				Listener(table.unpack(Arguments))
 			end
-			Queue.Reliable[11] = {}
+			Queue.Reliable[13] = {}
 			return function (): ()
-				if Events.Reliable[11] == Listener then
-					Events.Reliable[11] = nil
+				if Events.Reliable[13] == Listener then
+					Events.Reliable[13] = nil
 				end
 			end
 		end
@@ -2096,17 +2572,63 @@ local Returns = table.freeze({
 	},
 	Restart = {
 		On = function(Listener: (Player: Player, Value: number) -> ()): () -> ()
-			Events.Reliable[13] = Listener
-			for Index, Arguments in Queue.Reliable[13] do
+			Events.Reliable[15] = Listener
+			for Index, Arguments in Queue.Reliable[15] do
 				Listener(table.unpack(Arguments))
 			end
-			Queue.Reliable[13] = {}
+			Queue.Reliable[15] = {}
 			return function (): ()
-				if Events.Reliable[13] == Listener then
-					Events.Reliable[13] = nil
+				if Events.Reliable[15] == Listener then
+					Events.Reliable[15] = nil
 				end
 			end
 		end
+	},
+	RoundOver = {
+		Fire = function(Player: Player, Value: number): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_RoundOver(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_RoundOver(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_RoundOver(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_RoundOver(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
 	},
 	Weapons = {
 		Fire = function(Player: Player, Value: { string }): ()
@@ -2202,17 +2724,137 @@ local Returns = table.freeze({
 	},
 	SwitchWeapons = {
 		On = function(Listener: (Player: Player, Value: { string }) -> ()): () -> ()
-			Events.Reliable[16] = Listener
-			for Index, Arguments in Queue.Reliable[16] do
+			Events.Reliable[19] = Listener
+			for Index, Arguments in Queue.Reliable[19] do
 				Listener(table.unpack(Arguments))
 			end
-			Queue.Reliable[16] = {}
+			Queue.Reliable[19] = {}
 			return function (): ()
-				if Events.Reliable[16] == Listener then
-					Events.Reliable[16] = nil
+				if Events.Reliable[19] == Listener then
+					Events.Reliable[19] = nil
 				end
 			end
 		end
+	},
+	SetMain = {
+		On = function(Listener: (Player: Player, Value: string) -> ()): () -> ()
+			Events.Reliable[20] = Listener
+			for Index, Arguments in Queue.Reliable[20] do
+				Listener(table.unpack(Arguments))
+			end
+			Queue.Reliable[20] = {}
+			return function (): ()
+				if Events.Reliable[20] == Listener then
+					Events.Reliable[20] = nil
+				end
+			end
+		end
+	},
+	BuyPet = {
+		On = function(Listener: (Player: Player, Value: string) -> ()): () -> ()
+			Events.Reliable[21] = Listener
+			for Index, Arguments in Queue.Reliable[21] do
+				Listener(table.unpack(Arguments))
+			end
+			Queue.Reliable[21] = {}
+			return function (): ()
+				if Events.Reliable[21] == Listener then
+					Events.Reliable[21] = nil
+				end
+			end
+		end
+	},
+	Items = {
+		Fire = function(Player: Player, Value: { { id: string, level: number } }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_Items(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { { id: string, level: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_Items(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { { id: string, level: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_Items(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { { id: string, level: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_Items(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	MainWeapon = {
+		Fire = function(Player: Player, Value: number): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_MainWeapon(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MainWeapon(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MainWeapon(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: number): ()
+			Load()
+			SerdesFunctions.WriteEVENT_MainWeapon(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
 	},
 	Effect = {
 		Fire = function(Player: Player, Value: { { kind: number, pos: Vector3, radius: number, dir: Vector3 } }): ()
@@ -2247,6 +2889,144 @@ local Returns = table.freeze({
 		FireExcept = function(Except: Player, Value: { { kind: number, pos: Vector3, radius: number, dir: Vector3 } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_Effect(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	HazardSpawn = {
+		Fire = function(Player: Player, Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_HazardSpawn(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { { id: number, kind: number, pos: Vector3, radius: number, life: number } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	HazardRemove = {
+		Fire = function(Player: Player, Value: { number }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_HazardRemove(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_HazardRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	UltBeam = {
+		Fire = function(Player: Player, Value: { active: number, life: number, width: number, length: number }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_UltBeam(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { active: number, life: number, width: number, length: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_UltBeam(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { active: number, life: number, width: number, length: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_UltBeam(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { active: number, life: number, width: number, length: number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_UltBeam(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
 			for _, Player in Players:GetPlayers() do
 				if Player == Except then
@@ -2514,6 +3294,98 @@ local Returns = table.freeze({
 		FireExcept = function(Except: Player, Value: { number }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_PetDropRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	CardDropSpawn = {
+		Fire = function(Player: Player, Value: { { id: number, pos: Vector3 } }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_CardDropSpawn(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { { id: number, pos: Vector3 } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { { id: number, pos: Vector3 } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { { id: number, pos: Vector3 } }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropSpawn(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				if Player == Except then
+					continue
+				end
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+	},
+	CardDropRemove = {
+		Fire = function(Player: Player, Value: { number }): ()
+			Load(PlayersMap[Player])
+			SerdesFunctions.WriteEVENT_CardDropRemove(Value)
+			PlayersMap[Player] = Save()
+		end,
+		FireAll = function(Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in Players:GetPlayers() do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireList = function(List: {Player}, Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropRemove(Value)
+			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
+			for _, Player in List do
+				Load(PlayersMap[Player])
+				local Position = Allocate(Size)
+				buffer.copy(SendBuffer, Position, Buffer, 0, Size)
+				table.move(Instances, 1, #Instances, #SendInstances + 1, SendInstances)
+				PlayersMap[Player] = Save()
+			end
+		end,
+		FireExcept = function(Except: Player, Value: { number }): ()
+			Load()
+			SerdesFunctions.WriteEVENT_CardDropRemove(Value)
 			local Buffer, Size, Instances = SendBuffer, SendCursor, SendInstances
 			for _, Player in Players:GetPlayers() do
 				if Player == Except then
@@ -2887,21 +3759,21 @@ local Returns = table.freeze({
 		end,
 	},
 	UfoBeam = {
-		Fire = function(Player: Player, Value: { { id: number, target: Vector3 } }): ()
+		Fire = function(Player: Player, Value: { { id: number, target: Vector3, charging: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UfoBeam(Value)
 			local Buffer = buffer.create(SendCursor)
 			buffer.copy(Buffer, 0, SendBuffer, 0, SendCursor)
 			Unreliable:FireClient(Player, Buffer, SendInstances)
 		end,
-		FireAll = function(Value: { { id: number, target: Vector3 } }): ()
+		FireAll = function(Value: { { id: number, target: Vector3, charging: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UfoBeam(Value)
 			local Buffer = buffer.create(SendCursor)
 			buffer.copy(Buffer, 0, SendBuffer, 0, SendCursor)
 			Unreliable:FireAllClients(Buffer, SendInstances)
 		end,
-		FireList = function(List: {Player}, Value: { { id: number, target: Vector3 } }): ()
+		FireList = function(List: {Player}, Value: { { id: number, target: Vector3, charging: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UfoBeam(Value)
 			local Buffer = buffer.create(SendCursor)
@@ -2910,7 +3782,7 @@ local Returns = table.freeze({
 				Unreliable:FireClient(Player, Buffer, SendInstances)
 			end
 		end,
-		FireExcept = function(Except: Player, Value: { { id: number, target: Vector3 } }): ()
+		FireExcept = function(Except: Player, Value: { { id: number, target: Vector3, charging: number } }): ()
 			Load()
 			SerdesFunctions.WriteEVENT_UfoBeam(Value)
 			local Buffer = buffer.create(SendCursor)

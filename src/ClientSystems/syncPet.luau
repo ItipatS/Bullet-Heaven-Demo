@@ -6,22 +6,31 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
+local UserInputService  = game:GetService("UserInputService")
 
 local std       = ReplicatedStorage.std
 local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
 local blink     = require(std:WaitForChild("ClientNet"))
 local Pet       = require(std:WaitForChild("pet"))
+local Config    = require(std:WaitForChild("config"))
+local AimState  = require(std:WaitForChild("aimState"))
+local Registry  = require(std:WaitForChild("petRegistry"))
 
 local player = Players.LocalPlayer
 local mouse  = player:GetMouse()
+
+-- Where does aim come from? Touch → the on-screen stick (aimstick.luau writes AimState);
+-- otherwise the mouse cursor. Mirrors the same check aimstick.luau uses to build itself.
+local mode = Config.Controls.AIM_STICK
+local USE_STICK = mode == "always"
+    or (mode == "auto" and UserInputService.TouchEnabled and not UserInputService.MouseEnabled)
 
 local folder = Instance.new("Folder")
 folder.Name = "Pets"
 folder.Parent = workspace
 
 local Animals = ReplicatedStorage:WaitForChild("Animals")
-local MESH = { axolotl = "Axolotl", fox = "Fox", slime = "Slime", mole = "Mole", bear = "Bear" } -- weapon id → animal mesh
 
 local function makePart(meshName: string): BasePart
     local src = Animals:FindFirstChild(meshName)
@@ -50,7 +59,7 @@ local function rebuildLocalPets()
     for _, pt in localPets do pt:Destroy() end
     table.clear(localPets)
     for i, id in localIds do
-        local pt = makePart(MESH[id] or "Axolotl")
+        local pt = makePart(Registry.meshName(id))
         pt.Parent = folder
         localPets[i] = pt
     end
@@ -74,8 +83,14 @@ local function step(dt: number)
     local char = player.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if root then
-        local facing = mouse.UnitRay.Direction
-        facing = if facing.Magnitude > 1e-3 then facing.Unit else Vector3.new(0, 0, -1)
+        for _, pt in localPets do if pt.Parent ~= folder then pt.Parent = folder end end -- show on spawn
+        local facing
+        if USE_STICK then
+            facing = AimState.get() -- world-space aim from the mobile thumbstick
+        else
+            facing = mouse.UnitRay.Direction
+            facing = if facing.Magnitude > 1e-3 then facing.Unit else Vector3.new(0, 0, -1)
+        end
         sendAcc += dt
         if sendAcc >= SEND_DT then sendAcc = 0; blink.Aim.Fire(facing) end
 
@@ -89,6 +104,9 @@ local function step(dt: number)
             local pos = Pet.slotPos((root :: BasePart).Position, i - 1, n) + Vector3.new(0, bob, 0)
             pt.CFrame = CFrame.lookAt(pos, pos + facing) * CFrame.Angles(0, 0, roll)
         end
+    else
+        -- no character (menu / dead): hide local pets so they don't float in the menu camera shot
+        for _, pt in localPets do if pt.Parent then pt.Parent = nil end end
     end
 
     -- remote players: a single pet

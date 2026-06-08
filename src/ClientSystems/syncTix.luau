@@ -13,6 +13,8 @@ local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
 local blink     = require(std:WaitForChild("ClientNet"))
 local dropFx    = require(std:WaitForChild("dropFx"))
+local clientPlay = require(std:WaitForChild("clientPlay"))
+local Format    = require(std:WaitForChild("FormatUtils"))
 
 local FLOAT_FREQ = 2.0
 local FLOAT_AMP  = 0.5
@@ -53,8 +55,11 @@ label.Text = "⛁ 0 Tix  "
 label.Parent = gui
 Instance.new("UICorner").Parent = label
 
+-- in-game balance HUD only during a run (the menu shows Tix in its best-stats line already)
+clientPlay.onChanged(function(s) gui.Enabled = s == "playing" end)
+
 blink.TixCount.On(function(n)
-    label.Text = "⛁ " .. n .. " Tix  "
+    label.Text = "⛁ " .. Format.format_to_short_value(n) .. " Tix  " -- 12345 → 12.3K
 end)
 
 -- ── Drops ─────────────────────────────────────────────────────────────────────────

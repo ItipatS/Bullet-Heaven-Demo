@@ -7,11 +7,18 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local TweenService      = game:GetService("TweenService")
+local RunService        = game:GetService("RunService")
 
 local std       = ReplicatedStorage.std
 local blink     = require(std:WaitForChild("ClientNet"))
 local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
+local clientPlay = require(std:WaitForChild("clientPlay"))
+local Registry  = require(std:WaitForChild("petRegistry"))
+local ItemReg   = require(std:WaitForChild("itemRegistry"))
+
+local Animals = ReplicatedStorage:WaitForChild("Animals")
+local MAX_CARDS = 5 -- level-up offers 4; a boss/elite card pack offers 3-5
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -22,6 +29,9 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
+
+-- gameplay HUD: only during a live run (hidden at the menu + while spectating)
+clientPlay.onChanged(function(s) gui.Enabled = s == "playing" end)
 
 -- ── HUD: Level + XP bar (top center) ─────────────────────────────────────────────
 local hud = Instance.new("Frame")
@@ -83,7 +93,7 @@ hpLabel.Parent = hpBar
 -- ── Enemy count (top-left) ───────────────────────────────────────────────────────
 local enemyLabel = Instance.new("TextLabel")
 enemyLabel.AnchorPoint = Vector2.new(0, 0)
-enemyLabel.Position = UDim2.new(0, 12, 0.5, 8)
+enemyLabel.Position = UDim2.new(0, 12, 0, 12) -- top-left corner (left edge reserved for weapon slots)
 enemyLabel.Size = UDim2.new(0, 200, 0, 24)
 enemyLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
 enemyLabel.BackgroundTransparency = 0.35
@@ -138,26 +148,42 @@ blink.Toast.On(function(msg)
     TweenService:Create(toast, TweenInfo.new(2.2), { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
 end)
 
--- ── Cards: 3 on the right, hidden until a level-up ───────────────────────────────
+-- ── Cards: up to 4 on the right, hidden until an offer (level-up or a card pack) ──────
 local cardsHolder = Instance.new("Frame")
 cardsHolder.AnchorPoint = Vector2.new(1, 0.5)
 cardsHolder.Position = UDim2.new(1, -16, 0.5, 0)
-cardsHolder.Size = UDim2.new(0, 240, 0, 360)
+cardsHolder.Size = UDim2.new(0, 264, 0, 610)
 cardsHolder.BackgroundTransparency = 1
 cardsHolder.Visible = false
 cardsHolder.Parent = gui
 
 local layout = Instance.new("UIListLayout")
 layout.FillDirection = Enum.FillDirection.Vertical
-layout.Padding = UDim.new(0, 12)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0, 8)
 layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 layout.VerticalAlignment = Enum.VerticalAlignment.Center
 layout.Parent = cardsHolder
 
-local cards: { TextButton } = {}
-for i = 1, 3 do
+-- source banner above the cards (LEVEL UP vs CARD PACK) — LayoutOrder 0 keeps it on top
+local cardHeader = Instance.new("TextLabel")
+cardHeader.LayoutOrder = 0
+cardHeader.Size = UDim2.new(1, 0, 0, 34)
+cardHeader.BackgroundTransparency = 1
+cardHeader.Font = Enum.Font.GothamBlack
+cardHeader.TextSize = 24
+cardHeader.TextStrokeTransparency = 0.5
+cardHeader.Text = ""
+cardHeader.Parent = cardsHolder
+
+type CardUI = { btn: TextButton, title: TextLabel, desc: TextLabel, tag: TextLabel,
+    viewport: ViewportFrame, cam: Camera, badge: TextLabel }
+local cards: { CardUI } = {}
+local vpModels: { [number]: BasePart } = {} -- per-card spinning thumbnail model (cleared on reuse)
+
+for i = 1, MAX_CARDS do
     local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 100)
+    btn.Size = UDim2.new(1, 0, 0, 104)
     btn.BackgroundColor3 = Color3.fromRGB(34, 36, 48)
     btn.AutoButtonColor = true
     btn.BorderSizePixel = 0
@@ -166,11 +192,43 @@ for i = 1, 3 do
     btn.Parent = cardsHolder
     Instance.new("UICorner").Parent = btn
 
+    -- 3D weapon thumbnail (left), spun by the Heartbeat loop below
+    local viewport = Instance.new("ViewportFrame")
+    viewport.Name = "Viewport"
+    viewport.Position = UDim2.new(0, 8, 0, 8)
+    viewport.Size = UDim2.new(0, 90, 0, 96)
+    viewport.BackgroundColor3 = Color3.fromRGB(16, 18, 26)
+    viewport.BorderSizePixel = 0
+    viewport.Ambient = Color3.fromRGB(190, 195, 205)
+    viewport.LightColor = Color3.fromRGB(255, 255, 255)
+    viewport.LightDirection = Vector3.new(-1, -1.2, -0.6)
+    viewport.Parent = btn
+    Instance.new("UICorner").Parent = viewport
+    local cam = Instance.new("Camera")
+    cam.FieldOfView = 45
+    viewport.CurrentCamera = cam
+    cam.Parent = viewport
+
+    -- badge (items/stats have no 3D model) — a colored emoji tile shown in place of the viewport
+    local badge = Instance.new("TextLabel")
+    badge.Name = "Badge"
+    badge.Position = viewport.Position
+    badge.Size = viewport.Size
+    badge.BackgroundColor3 = Color3.fromRGB(40, 44, 60)
+    badge.BorderSizePixel = 0
+    badge.Font = Enum.Font.GothamBold
+    badge.TextSize = 40
+    badge.TextColor3 = Color3.new(1, 1, 1)
+    badge.Text = ""
+    badge.Visible = false
+    badge.Parent = btn
+    Instance.new("UICorner").Parent = badge
+
     local title = Instance.new("TextLabel")
     title.Name = "Title"
     title.BackgroundTransparency = 1
-    title.Position = UDim2.new(0, 10, 0, 8)
-    title.Size = UDim2.new(1, -20, 0, 26)
+    title.Position = UDim2.new(0, 106, 0, 8)
+    title.Size = UDim2.new(1, -116, 0, 24)
     title.Font = Enum.Font.GothamBold
     title.TextSize = 18
     title.TextXAlignment = Enum.TextXAlignment.Left
@@ -178,11 +236,22 @@ for i = 1, 3 do
     title.Text = ""
     title.Parent = btn
 
+    local tag = Instance.new("TextLabel")
+    tag.Name = "Tag"
+    tag.BackgroundTransparency = 1
+    tag.Position = UDim2.new(0, 106, 0, 32)
+    tag.Size = UDim2.new(1, -116, 0, 16)
+    tag.Font = Enum.Font.GothamBold
+    tag.TextSize = 12
+    tag.TextXAlignment = Enum.TextXAlignment.Left
+    tag.Text = ""
+    tag.Parent = btn
+
     local desc = Instance.new("TextLabel")
     desc.Name = "Desc"
     desc.BackgroundTransparency = 1
-    desc.Position = UDim2.new(0, 10, 0, 38)
-    desc.Size = UDim2.new(1, -20, 1, -46)
+    desc.Position = UDim2.new(0, 106, 0, 50)
+    desc.Size = UDim2.new(1, -116, 1, -58)
     desc.Font = Enum.Font.Gotham
     desc.TextSize = 14
     desc.TextWrapped = true
@@ -192,24 +261,40 @@ for i = 1, 3 do
     desc.Text = ""
     desc.Parent = btn
 
-    local tag = Instance.new("TextLabel")
-    tag.Name = "Tag"
-    tag.BackgroundTransparency = 1
-    tag.AnchorPoint = Vector2.new(1, 0)
-    tag.Position = UDim2.new(1, -8, 0, 6)
-    tag.Size = UDim2.new(0, 120, 0, 16)
-    tag.Font = Enum.Font.GothamBold
-    tag.TextSize = 12
-    tag.TextXAlignment = Enum.TextXAlignment.Right
-    tag.Text = ""
-    tag.Parent = btn
-
     btn.Activated:Connect(function()
         blink.ChooseCard.Fire(i)
         cardsHolder.Visible = false
     end)
-    cards[i] = btn
+    cards[i] = { btn = btn, title = title, desc = desc, tag = tag, viewport = viewport, cam = cam, badge = badge }
 end
+
+-- put the pet's mesh in card `i`'s viewport (or clear it for player-stat cards)
+local function setCardModel(i: number, petId: string?)
+    local old = vpModels[i]
+    if old then old:Destroy(); vpModels[i] = nil end
+    if not petId or petId == "" then return end
+    local src = Animals:FindFirstChild(Registry.meshName(petId))
+    if src and src:IsA("BasePart") then
+        local p = src:Clone()
+        p.Anchored = true
+        p.CanCollide = false
+        p.CFrame = CFrame.new(0, 0, 0)
+        p.Parent = cards[i].viewport
+        vpModels[i] = p
+    end
+end
+
+-- spin each visible thumbnail's camera around its model
+local vpAngle = 0
+RunService.Heartbeat:Connect(function(dt)
+    if not cardsHolder.Visible then return end
+    vpAngle += dt * 0.8
+    for i, m in vpModels do
+        local dist = m.Size.Magnitude + 1.4
+        local eye = Vector3.new(math.cos(vpAngle) * dist, m.Size.Y * 0.35, math.sin(vpAngle) * dist)
+        cards[i].cam.CFrame = CFrame.lookAt(eye, Vector3.new(0, 0, 0))
+    end
+end)
 
 -- ── Net ───────────────────────────────────────────────────────────────────────
 blink.Stats.On(function(s)
@@ -222,31 +307,52 @@ blink.Stats.On(function(s)
     end
 end)
 
-blink.LevelUp.On(function(choices)
-    for i = 1, 3 do
-        local btn = cards[i]
+blink.LevelUp.On(function(offer)
+    local choices = offer.cards
+    -- header by source (0 = level up, 1 = boss/elite card pack)
+    if offer.source == 1 then
+        cardHeader.Text = "🎴  CARD PACK"
+        cardHeader.TextColor3 = Color3.fromRGB(255, 210, 120)
+    else
+        cardHeader.Text = "⬆  LEVEL UP!"
+        cardHeader.TextColor3 = Color3.fromRGB(150, 255, 170)
+    end
+    for i = 1, MAX_CARDS do
+        local ui = cards[i]
         local c = choices[i]
         if c then
-            btn.Visible = true;
-            (btn:FindFirstChild("Title") :: TextLabel).Text = c.title;
-            (btn:FindFirstChild("Desc") :: TextLabel).Text = c.desc
-            -- kind: 0 player stat, 1 pet stat, 2 pet perk, 3 new pet
-            local tag = btn:FindFirstChild("Tag") :: TextLabel
-            if c.kind == 3 then
-                tag.Text = "✦ NEW PET · " .. c.weapon
-                tag.TextColor3 = Color3.fromRGB(130, 255, 150)
-            elseif c.kind == 2 then
-                tag.Text = "◆ PERK · " .. c.weapon
-                tag.TextColor3 = Color3.fromRGB(210, 150, 255)
-            elseif c.kind == 1 then
-                tag.Text = "◈ " .. c.weapon .. " STAT"
-                tag.TextColor3 = Color3.fromRGB(140, 200, 255)
+            ui.btn.Visible = true
+            ui.title.Text = c.title
+            ui.desc.Text = c.desc
+            -- kind: 0 stat, 2 weapon upgrade, 3 new weapon, 4 item. `weapon` = pet id OR item id.
+            if c.kind == 2 or c.kind == 3 then
+                local petName = (Registry.pets[c.weapon] and Registry.pets[c.weapon].name) or c.weapon
+                ui.tag.Text = (if c.kind == 3 then "✦ NEW WEAPON · " else "◆ UPGRADE · ") .. petName
+                ui.tag.TextColor3 = if c.kind == 3 then Color3.fromRGB(130, 255, 150) else Color3.fromRGB(210, 150, 255)
+                ui.viewport.Visible = true
+                ui.badge.Visible = false
+                setCardModel(i, c.weapon)
+            elseif c.kind == 4 then
+                local it = ItemReg.items[c.weapon]
+                ui.tag.Text = "◇ ITEM · " .. ((it and it.name) or c.weapon)
+                ui.tag.TextColor3 = Color3.fromRGB(120, 220, 255)
+                setCardModel(i, nil)
+                ui.viewport.Visible = false
+                ui.badge.Visible = true
+                ui.badge.Text = (it and it.icon) or "◇"
+                ui.badge.BackgroundColor3 = (it and it.color) or Color3.fromRGB(40, 44, 60)
             else
-                tag.Text = "★ PLAYER STAT"
-                tag.TextColor3 = Color3.fromRGB(255, 215, 120)
+                ui.tag.Text = "★ PLAYER STAT"
+                ui.tag.TextColor3 = Color3.fromRGB(255, 215, 120)
+                setCardModel(i, nil)
+                ui.viewport.Visible = false
+                ui.badge.Visible = true
+                ui.badge.Text = "★"
+                ui.badge.BackgroundColor3 = Color3.fromRGB(60, 54, 30)
             end
         else
-            btn.Visible = false
+            ui.btn.Visible = false
+            setCardModel(i, nil)
         end
     end
     cardsHolder.Visible = true

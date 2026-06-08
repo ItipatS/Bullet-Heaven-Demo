@@ -19,6 +19,8 @@ local ServerScriptService  = game:GetService("ServerScriptService")
 
 local blink       = require(ServerScriptService.ServerNet)
 local PlayerState = require(ReplicatedStorage.std.playerState)
+local Registry    = require(ReplicatedStorage.std.petRegistry) -- pet prices for the Tix shop
+local Progress    = require(script.Parent.progression) -- to push the loaded collection to the client
 
 local STORE = DataStoreService:GetDataStore("PlayerProfile_v1")
 local AUTOSAVE = 60
@@ -26,8 +28,12 @@ local AUTOSAVE = 60
 type Profile = {
     tix: number, bestWave: number, bestLevel: number,
     bestTime: number, totalKills: number, runs: number,
+    pets: { [string]: boolean }, -- owned pet COLLECTION (pet tab); starts with the 3 starters
+    squad: { string },           -- the chosen run squad (ordered, slot1 = main), picked at the menu
 }
-local DEFAULT: Profile = { tix = 0, bestWave = 0, bestLevel = 1, bestTime = 0, totalKills = 0, runs = 0 }
+local DEFAULT: Profile = { tix = 0, bestWave = 0, bestLevel = 1, bestTime = 0, totalKills = 0, runs = 0,
+    pets = { axolotl = true, fox = true, slime = true }, squad = { "axolotl" } }
+local STARTERS = { "axolotl", "fox", "slime" } -- granted to a brand-new profile
 
 local profiles: { [Player]: Profile } = {}
 local canSave:  { [Player]: boolean } = {} -- only true once a load SUCCEEDS (don't clobber on read fail)
@@ -56,22 +62,43 @@ local function load(plr: Player)
     local data
     local ok = pcall(function() data = STORE:GetAsync(keyFor(plr)) end)
     local p = table.clone(DEFAULT)
+    p.pets = { axolotl = true, fox = true, slime = true } -- fresh copy (table.clone is shallow)
+    p.squad = { "axolotl" }
     if ok and type(data) == "table" then
         for k in DEFAULT do
             if type(data[k]) == "number" then p[k] = data[k] end
         end
+        if type(data.pets) == "table" then
+            p.pets = {}
+            for id, v in data.pets do if v == true then p.pets[id] = true end end
+            for _, id in STARTERS do p.pets[id] = true end -- always grant the starters
+        end
+        if type(data.squad) == "table" then
+            p.squad = {}
+            for _, id in data.squad do if type(id) == "string" then p.squad[#p.squad + 1] = id end end
+        elseif type(data.starter) == "string" then
+            p.squad = { data.starter } -- migrate old single-starter profiles
+        end
     end
+    if #p.squad == 0 then p.squad = { "axolotl" } end
     profiles[plr] = p
     canSave[plr] = ok
-    -- seed the live run with the persisted balance + push to the client
-    PlayerState.get(plr).tix = p.tix
+    -- seed the live state: balance + owned COLLECTION + chosen squad, then push to the client
+    local s = PlayerState.get(plr)
+    s.tix = p.tix
+    s.owned = p.pets -- share the ref so drop/shop unlocks land straight in the persisted table
+    PlayerState.setSquad(plr, p.squad) -- validate (owned/cap) + build the run loadout
     blink.TixCount.Fire(plr, math.floor(p.tix))
     sendProfile(plr)
+    Progress.pushLoadout(plr) -- send the collection (Unlocked) + squad (Weapons/Main)
 end
 
 local function save(plr: Player)
     local p = profiles[plr]
     if not p or not canSave[plr] then return end -- never overwrite real data after a failed load
+    local s = PlayerState.get(plr)
+    p.pets = s.owned    -- snapshot the live collection (drop/shop unlocks)
+    p.squad = s.squad   -- and the chosen squad
     pcall(function()
         STORE:UpdateAsync(keyFor(plr), function()
             return p -- p.tix is kept current by M.addTix, so this is safe even mid-leave
@@ -98,6 +125,21 @@ function M.addKills(plr: Player, n: number)
     local p = profiles[plr]
     if p then p.totalKills += n end
 end
+
+-- Tix shop (menu): buy a locked pet. Validates balance, deducts (persisted), unlocks the collection.
+blink.BuyPet.On(function(plr, petId)
+    if PlayerState.get(plr).playing then return end -- shop is menu-only
+    local pet = Registry.pets[petId]
+    if not pet then return end
+    local s = PlayerState.get(plr)
+    if s.owned[petId] then return end -- already owned
+    local price = pet.price or 0
+    if price <= 0 or s.tix < price then return end -- not for sale / can't afford
+    M.addTix(plr, -price) -- deduct (updates profile + mirror + fires TixCount)
+    PlayerState.ownPet(plr, petId) -- s.owned shares the persisted p.pets ref
+    Progress.pushLoadout(plr) -- resend Unlocked (the pet tab refreshes)
+    blink.Toast.Fire(plr, "Unlocked " .. pet.name .. "!")
+end)
 
 function M.recordRun(plr: Player, wave: number, level: number, time: number)
     local p = profiles[plr]

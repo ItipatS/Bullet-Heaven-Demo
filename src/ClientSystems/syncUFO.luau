@@ -12,6 +12,7 @@ local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
 local blink     = require(std:WaitForChild("ClientNet"))
 local dropFx    = require(std:WaitForChild("dropFx"))
+local MobBar    = require(std:WaitForChild("mobBar"))
 
 local Assets = ReplicatedStorage:WaitForChild("Assets")
 
@@ -56,8 +57,13 @@ local function makeUfo(scale: number): Model
     return m
 end
 
-type Ufo = { model: Model, target: Vector3, render: Vector3, parts: { BasePart }, colors: { Color3 }, flashUntil: number }
+-- Each UFO is WELDED into a single assembly with one anchored root part, so per frame we move
+-- ONE root (the ~28 parts follow via WeldConstraints) instead of pushing all 28 through
+-- BulkMoveTo. At ~170 UFOs that's 170 moved parts/frame instead of ~4700 — UFOs were secretly
+-- moving more parts than the entire zombie horde (3000 roots).
+type Ufo = { model: Model, root: BasePart, target: Vector3, render: Vector3, parts: { BasePart }, colors: { Color3 }, flashUntil: number }
 local ufos: { [number]: Ufo } = {}
+local ufoBarFill: { [number]: Frame } = {} -- elite/boss UFO health-bar fill (X scale = hp/max)
 
 blink.Spawn.On(function(batch)
     for _, p in batch do
@@ -65,14 +71,35 @@ blink.Spawn.On(function(batch)
         if ufos[p.id] then continue end
         local pos = p.pos :: Vector3
         local m = makeUfo(p.size)
-        m:PivotTo(CFrame.new(pos) * UFO_ORIENT)
-        m.Parent = folder
-        -- cache parts + base colours for the hurt flash
+        local pivot = CFrame.new(pos) * UFO_ORIENT
+        m:PivotTo(pivot)
+        -- anchored invisible root at the pivot; weld every visible part to it (capturing their
+        -- current world offsets) and unanchor them so moving the root drags the whole UFO
+        local root = Instance.new("Part")
+        root.Name = "MoveRoot"
+        root.Size = Vector3.new(0.2, 0.2, 0.2)
+        root.Transparency = 1
+        root.Anchored = true
+        root.CanCollide = false; root.CanQuery = false; root.CanTouch = false; root.CastShadow = false
+        root.CFrame = pivot
+        root.Parent = m
         local parts: { BasePart }, colors: { Color3 } = {}, {}
         for _, d in m:GetDescendants() do
-            if d:IsA("BasePart") then parts[#parts + 1] = d; colors[#colors + 1] = d.Color end
+            if d:IsA("BasePart") and d ~= root then
+                parts[#parts + 1] = d
+                colors[#colors + 1] = d.Color
+                d.Anchored = false
+                local wc = Instance.new("WeldConstraint")
+                wc.Part0 = root; wc.Part1 = d; wc.Parent = root
+            end
         end
-        ufos[p.id] = { model = m, target = pos, render = pos, parts = parts, colors = colors, flashUntil = 0 }
+        m.PrimaryPart = root
+        m.Parent = folder
+        if p.tier >= 1 then -- elite/boss UFO → health bar (boss also gets 👑 BOSS); dies with the model
+            local _bb, fill = MobBar.attach(root, 4 * p.size + 3, p.tier == 2)
+            ufoBarFill[p.id] = fill
+        end
+        ufos[p.id] = { model = m, root = root, target = pos, render = pos, parts = parts, colors = colors, flashUntil = 0 }
     end
 end)
 
@@ -95,6 +122,16 @@ blink.UfoMove.On(function(batch)
     end
 end)
 
+-- elite/boss UFO HP → update the floating health bar fill (ManySync; zombies handle their own ids)
+blink.MobHealth.On(function(batch)
+    for _, h in batch do
+        local fill = ufoBarFill[h.id]
+        if fill then
+            fill.Size = UDim2.new(if h.max > 0 then math.clamp(h.hp / h.max, 0, 1) else 0, 0, 1, 0)
+        end
+    end
+end)
+
 -- ── Bolts (laser bullets) ───────────────────────────────────────────────────────
 type Bolt = { part: BasePart, ox: number, oy: number, oz: number, vx: number, vy: number, vz: number, t0: number, life: number }
 local bolts: { Bolt } = {}
@@ -104,8 +141,10 @@ local function makeBoltPart(): BasePart
     local p = table.remove(boltFree)
     if p then return p end
     p = Instance.new("Part")
-    p.Shape = Enum.PartType.Ball
-    p.Size = Vector3.new(1.3, 1.3, 1.3)
+    -- a thin glowing BAR (oriented along travel below) reads as a laser bolt and is 12 tris,
+    -- vs ~760 for a Ball — at a few hundred bolts that's the difference between ~190k and ~3k tris
+    p.Shape = Enum.PartType.Block
+    p.Size = Vector3.new(0.5, 0.5, 3.2)
     p.Material = Enum.Material.Neon
     p.Color = Color3.fromRGB(255, 120, 50)
     p.Anchored = true
@@ -125,7 +164,7 @@ blink.UfoFire.On(function(batch)
 end)
 
 -- ── Beams (elite/boss) ──────────────────────────────────────────────────────────
-type Beam = { part: BasePart, target: Vector3, last: number }
+type Beam = { part: BasePart, target: Vector3, last: number, charging: boolean }
 local beams: { [number]: Beam } = {}
 
 local function makeBeamPart(): BasePart
@@ -143,9 +182,10 @@ blink.UfoBeam.On(function(batch)
     local now = os.clock()
     for _, bm in batch do
         local b = beams[bm.id]
-        if not b then b = { part = makeBeamPart(), target = bm.target :: Vector3, last = now }; beams[bm.id] = b end
+        if not b then b = { part = makeBeamPart(), target = bm.target :: Vector3, last = now, charging = false }; beams[bm.id] = b end
         b.target = bm.target :: Vector3
         b.last = now
+        b.charging = bm.charging == 1
     end
 end)
 
@@ -154,31 +194,50 @@ blink.Death.On(function(ids)
     for _, id in ids do
         local r = ufos[id]
         if r then r.model:Destroy(); ufos[id] = nil end
+        ufoBarFill[id] = nil -- bar billboard was parented to the model → destroyed with it
         local b = beams[id]
         if b then b.part:Destroy(); beams[id] = nil end
     end
 end)
 
+-- Defensive: a round ended → wipe ALL lingering UFO state (models, beams, in-flight bolts) so
+-- nothing can survive into the next round if a Death was ever missed (host teardown, etc.).
+blink.RoundOver.On(function()
+    for _, u in ufos do u.model:Destroy() end
+    table.clear(ufos)
+    for _, b in beams do b.part:Destroy() end
+    table.clear(beams)
+    for _, b in bolts do b.part.Parent = nil; boltFree[#boltFree + 1] = b.part end
+    table.clear(bolts)
+    table.clear(ufoBarFill)
+end)
+
 -- ── Render ──────────────────────────────────────────────────────────────────────
+-- Reused scratch arrays for the one-shot BulkMoveTo (no per-frame realloc).
+local moveParts: { BasePart } = {}
+local moveCfs: { CFrame } = {}
+
 local function step(dt: number)
     local a = math.min(1, LERP_RATE * dt)
     local clk = os.clock()
     local srvNow = workspace:GetServerTimeNow()
 
-    -- UFOs: lerp toward streamed target, gentle bob. Keep the model's authored orientation
-    -- (no rotation applied — it's already correct).
+    -- UFOs: lerp toward streamed target + gentle bob, queue ONE root per UFO (welded parts follow).
+    local mw = 0
     for _id, u in ufos do
         u.render = u.render:Lerp(u.target, a)
         local bob = math.sin(clk * BOB_FREQ + _id) * BOB_AMP
-        u.model:PivotTo(CFrame.new(u.render.X, u.render.Y + bob, u.render.Z) * UFO_ORIENT)
+        mw += 1
+        moveParts[mw] = u.root
+        moveCfs[mw] = CFrame.new(u.render.X, u.render.Y + bob, u.render.Z) * UFO_ORIENT
         -- restore colours when the hurt flash expires
         if u.flashUntil > 0 and clk >= u.flashUntil then
             for i, part in u.parts do part.Color = u.colors[i] end
             u.flashUntil = 0
         end
     end
-
-    -- bolts: formula motion, despawn at life
+    -- bolts: formula motion, despawn at life. Queue live ones into the SAME scratch arrays so
+    -- UFO parts AND every bolt move together in one BulkMoveTo below.
     local w = 1
     for i = 1, #bolts do
         local b = bolts[i]
@@ -187,12 +246,20 @@ local function step(dt: number)
             b.part.Parent = nil
             boltFree[#boltFree + 1] = b.part
         else
-            b.part.Position = Vector3.new(b.ox + b.vx * age, b.oy + b.vy * age, b.oz + b.vz * age)
+            mw += 1
+            moveParts[mw] = b.part
+            -- orient the bar along its velocity so the laser points where it's going
+            local px, py, pz = b.ox + b.vx * age, b.oy + b.vy * age, b.oz + b.vz * age
+            moveCfs[mw] = CFrame.lookAt(Vector3.new(px, py, pz), Vector3.new(px + b.vx, py + b.vy, pz + b.vz))
             bolts[w] = b
             w += 1
         end
     end
     for i = #bolts, w, -1 do bolts[i] = nil end
+
+    -- trim scratch tails from a previous (larger) frame, then move UFOs + bolts at once
+    for i = #moveParts, mw + 1, -1 do moveParts[i] = nil; moveCfs[i] = nil end
+    if mw > 0 then workspace:BulkMoveTo(moveParts, moveCfs, Enum.BulkMoveMode.FireCFrameChanged) end
 
     -- beams: draw UFO → endpoint; drop if its UFO is gone or it stopped updating
     for id, b in beams do
@@ -204,7 +271,15 @@ local function step(dt: number)
             local from = u.render
             local to = b.target
             local len = (from - to).Magnitude
-            b.part.Size = Vector3.new(0.6, 0.6, math.max(0.2, len))
+            if b.charging then -- TELEGRAPH: thin, pulsing amber warning line — no damage yet, dodge it
+                b.part.Size = Vector3.new(0.2, 0.2, math.max(0.2, len))
+                b.part.Color = Color3.fromRGB(255, 190, 50)
+                b.part.Transparency = 0.25 + 0.3 * (0.5 + 0.5 * math.sin(clk * 10))
+            else -- FIRING: thick, opaque red death beam
+                b.part.Size = Vector3.new(0.6, 0.6, math.max(0.2, len))
+                b.part.Color = Color3.fromRGB(255, 60, 60)
+                b.part.Transparency = 0
+            end
             b.part.CFrame = CFrame.lookAt((from + to) * 0.5, to)
         end
     end

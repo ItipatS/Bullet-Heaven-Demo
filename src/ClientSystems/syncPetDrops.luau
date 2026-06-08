@@ -12,9 +12,8 @@ local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
 local blink     = require(std:WaitForChild("ClientNet"))
 
+local Registry = require(std:WaitForChild("petRegistry"))
 local Animals = ReplicatedStorage:WaitForChild("Animals")
-local MESH = { axolotl = "Axolotl", fox = "Fox", slime = "Slime", mole = "Mole", bear = "Bear" }
-local PET_NAME = { axolotl = "Axolotl", fox = "Fox", slime = "Slime", mole = "Mole", bear = "Bear" }
 
 local PARTICLE_TEX = "rbxassetid://14657415531"
 local RAINBOW = ColorSequence.new({
@@ -38,7 +37,7 @@ type Drop = { model: Model, x: number, z: number, baseY: number }
 local drops: { [number]: Drop } = {}
 
 local function makeAnimal(pet: string): BasePart
-    local src = Animals:FindFirstChild(MESH[pet] or "Axolotl")
+    local src = Animals:FindFirstChild(Registry.meshName(pet))
     local p: BasePart
     if src and src:IsA("BasePart") then
         p = src:Clone()
@@ -123,7 +122,7 @@ local function build(pet: string): Model
     lbl.TextSize = 18
     lbl.TextColor3 = Color3.fromRGB(255, 245, 180)
     lbl.TextStrokeTransparency = 0.4
-    lbl.Text = PET_NAME[pet] or pet
+    lbl.Text = (Registry.pets[pet] and Registry.pets[pet].name) or pet
     lbl.Parent = bb
 
     model.Parent = folder

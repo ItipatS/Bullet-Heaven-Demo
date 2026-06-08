@@ -65,6 +65,25 @@ local components: {
 	Boss: Entity,  -- tag: rare big monster that drops a PET pickup on death
 	Flying: Entity, -- tag: UFO — ignores pathfinding, hovers + attacks at range (ufo.luau)
 	Knock: Entity<Vector3>, -- current knockback velocity (decays); horde applies it
+	Slot: Entity<number>, -- dense replication slot (0..N); the wire position key (no per-mob id)
+	-- Status effects (mob buffs/debuffs). Combat APPLIES via std/statuses; statuses.tick() owns expiry
+	-- and folds active effects into the derived SpeedMul. Movement (horde) reads ONLY SpeedMul — it
+	-- never interprets a raw effect. Add a new effect = new component here + an aggregation rule in statuses.
+	Slow: Entity<{ factor: number, untilT: number }>, -- raw effect: factor (<1 slow, >1 haste) until untilT
+	SpeedMul: Entity<number>, -- DERIVED: aggregate movement multiplier (absent = 1, normal speed)
+
+	-- Player buffs (players are ECS entities — Player/Character live here). Same shape as mob statuses:
+	-- std/playerBuffs APPLIES timed buffs into `Buffs`; its resolver folds them WITH passive gear defense
+	-- into the derived `PlayerMods`. Combat + ufo QUERY PlayerMods for the damage loop instead of reading
+	-- PlayerState modifiers inline. Add a buff = a new `kind` + an aggregation branch in playerBuffs.tick.
+	Buffs: Entity<{ [string]: { mag: number, untilT: number } }>, -- active timed buffs, keyed by kind (refresh-by-kind)
+	-- DERIVED: the player's FULL resolved combat modifier set (passive stats + active timed buffs).
+	-- DEFENSE/move: invuln/armor/reflect/regen/walkSpeed (damage loop + ufo). OFFENSE/firing path
+	-- (fireStep/spawnBubble/SKILLS): damage(×)/crit(+)/critDmg(+)/atkSize(×)/knock(×)/haste(×)/skillCd(×).
+	PlayerMods: Entity<{
+		invuln: boolean, armor: number, reflect: number, regen: number, walkSpeed: number,
+		damage: number, crit: number, critDmg: number, atkSize: number, knock: number, haste: number, skillCd: number,
+	}>,
 } = {
 		Character = world:component(),
 		Mob = world:component(),
@@ -105,6 +124,11 @@ local components: {
 		Boss = world:component(),
 		Flying = world:component(),
 		Knock = world:component(),
+		Slot = world:component(),
+		Slow = world:component(),
+		SpeedMul = world:component(),
+		Buffs = world:component(),
+		PlayerMods = world:component(),
 	}
 
 for name, component in components :: {[string]: jecs.Entity} do 
