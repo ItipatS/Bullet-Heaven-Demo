@@ -182,7 +182,26 @@ owns `addTix` — keeping the balance authority in one place.
 
 ---
 
-## 8. One-line mental model & recipes
+## 8. REPLICATE → the client mirror
+
+The server **resolves** state into components, then **replicates** the player-facing slices over Blink.
+The client applies the *same* single-source discipline: `std/clientState.luau` is the ONE listener for
+each player-data event (`Stats, StatSheet, Items, Weapons, MainWeapon, Profile, TixCount, Unlocked`) and
+fans out to HUD widgets via `clientState.on<Event>(fn)` (which fires immediately with the cached value, so
+a late subscriber is never stale). Widgets — the top-right panel, the health/EXP bars, the skill bar, the
+pet/item tabs — **subscribe to the mirror, never to Blink directly**. So no event has more than one client
+listener, each value (`hp`, `weapons`, `tix`…) lives in one place, and the `SingleSync`/`ManySync` drop
+bug (a second listener silently dropped, load-order dependent → "updates one HUD in Studio, the other
+live") becomes *structurally impossible*. It's the resolver pattern again, on the presentation side.
+
+**Co-op loot is per-player, not raced.** Every drop system (`exp`, `healthdrops`, `tixdrops`, `carddrops`,
+`petdrops`) spawns a SEPARATE owner-tagged copy of each drop FOR EACH player in the run — sent only to that
+owner, collectible only by them. Two players killing a boss each get their own card pack + their own pet
+(picked from one *they* don't own); nobody races. A deliberate, friendly co-op design — not a dupe bug.
+
+---
+
+## 9. One-line mental model & recipes
 
 > **Registries** = templates (pet base/trees/skill meta, item apply fns).
 > **State** = the live run (player stats + items + gear defense + cloned upgraded pet instances).

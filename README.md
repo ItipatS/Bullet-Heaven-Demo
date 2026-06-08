@@ -106,8 +106,10 @@ Backed by combat primitives — **slow/DoT ground hazards, a sweeping beam, orbi
 armor / thorns / regen / brief invulnerability, knockback, crit, hit-flash** — and an economy:
 **passive items**, a **Tix** meta-currency that **persists across sessions via DataStore**
 (alongside the owned-pet collection, chosen main, and lifetime best-stats), boss/elite **card
-packs** and **pet drops**, and a **Tix shop**. Plus **mobile support** (on-screen aim stick,
-resolution-scaled HUD). A full survive-and-build loop, all server-authoritative.
+packs** and **pet drops**, and a **Tix shop**. Every drop — XP, hearts, Tix, card packs, pets — is
+**per-player instanced**, so co-op loot is never a race: each player gets their own copy and full
+rewards. Plus **mobile support** (on-screen aim stick, resolution-scaled HUD). A full
+survive-and-build loop, all server-authoritative.
 
 ## Architecture
 
@@ -123,7 +125,8 @@ ServerScriptService/     authoritative systems (auto-loaded per folder):
   systems/statuses       mob status resolver  (raw Slow → derived SpeedMul)
   systems/playerBuffs    player modifier resolver (gear + items + timed buffs → PlayerMods)
   systems/{exp,progression,profile,...drops,players}  XP/cards, DataStore, drops, spawn gating
-ClientSystems/           pure-presentation renderers + UI (sync* + HUD/menu/panels)
+ClientSystems/           pure-presentation renderers + UI (sync* + HUD/menu/panels), reading a
+                         single client mirror (std/clientState) instead of Blink directly
 ```
 
 The codebase converges on one shape everywhere — **apply → resolve → query, with table-driven
@@ -140,6 +143,10 @@ ladder:
   new/typo'd key is never a silent no-op.
 - **Single source of truth.** `std/petRegistry.luau` (pet data) and `std/itemRegistry.luau` feed
   both the UI and the real combat math, so the panel and the simulation can never drift.
+- **One mirror on the client, too.** Player-data events land in a single `std/clientState` store —
+  the *only* Blink listener for each — and HUD widgets *subscribe* to it rather than each listening
+  themselves. So no event needs more than one listener, and each value (hp, weapons, Tix…) lives in
+  one place: the same single-source discipline as the server resolvers, on the presentation side.
 - **Networking** via **Blink** — a binary IDL that generates the (never-hand-edited) buffer
   packing: formula projectiles, dense position deltas, periodic snapshots, and compact event
   channels for hazards / skills / drops / currency.
