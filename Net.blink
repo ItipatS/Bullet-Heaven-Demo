@@ -378,10 +378,11 @@ event Items {
 }
 
 -- Server → one player: the current MAIN weapon slot index (skillbar shows that weapon's skill).
+-- ManySync: the skill bar (skillbar) AND the weapon-slot HUD (playerhud) both track the main slot.
 event MainWeapon {
     From: Server,
     Type: Reliable,
-    Call: SingleSync,
+    Call: ManySync,
     Poll: false,
     Data: u8
 }
@@ -454,10 +455,12 @@ event WaveStart {
 }
 
 -- Server → one player: progression HUD update.
+-- ManySync: BOTH the top-right stats panel (playerhud) AND the on-screen health/EXP bars (syncCards)
+-- listen. SingleSync would drop one (load-order dependent → updates one HUD in Studio, the other live).
 event Stats {
     From: Server,
     Type: Reliable,
-    Call: SingleSync,
+    Call: ManySync,
     Poll: false,
     Data: StatsMsg
 }

@@ -185,12 +185,14 @@ Queue.Reliable[18] = table.create(256)
 Queue.Reliable[19] = table.create(256)
 Events.Reliable[23] = {}
 Queue.Reliable[23] = table.create(256)
+Events.Reliable[24] = {}
 Queue.Reliable[24] = table.create(256)
 Queue.Reliable[25] = table.create(256)
 Queue.Reliable[26] = table.create(256)
 Queue.Reliable[27] = table.create(256)
 Queue.Reliable[28] = table.create(256)
 Queue.Reliable[29] = table.create(256)
+Events.Reliable[30] = {}
 Queue.Reliable[30] = table.create(256)
 Events.Unreliable[3] = {}
 Queue.Unreliable[3] = table.create(256)
@@ -1985,9 +1987,11 @@ Reliable.OnClientEvent:Connect(function(Buffer: buffer, Instances: {Instance})
 			end
 		elseif Index == 24 then
 			local Value: number = SerdesFunctions.ReadEVENT_MainWeapon()
-			if Events.Reliable[24] ~= nil then
-				SerdesEvent = "MainWeapon"
-				Events.Reliable[24](Value)
+			if #Events.Reliable[24] > 0 then
+				for _, Listener in Events.Reliable[24] do
+					SerdesEvent = "MainWeapon"
+					Listener(Value)
+				end
 			else
 				if #Queue.Reliable[24] > 256 then
 					warn("[Blink]: Event queue of \"MainWeapon\" exceeded 256, did you forget to implement a listener?")
@@ -2051,9 +2055,11 @@ Reliable.OnClientEvent:Connect(function(Buffer: buffer, Instances: {Instance})
 			end
 		elseif Index == 30 then
 			local Value: { level: number, xp: number, xpNext: number, hp: number, maxHp: number } = SerdesFunctions.ReadEVENT_Stats()
-			if Events.Reliable[30] ~= nil then
-				SerdesEvent = "Stats"
-				Events.Reliable[30](Value)
+			if #Events.Reliable[30] > 0 then
+				for _, Listener in Events.Reliable[30] do
+					SerdesEvent = "Stats"
+					Listener(Value)
+				end
 			else
 				if #Queue.Reliable[30] > 256 then
 					warn("[Blink]: Event queue of \"Stats\" exceeded 256, did you forget to implement a listener?")
@@ -2562,14 +2568,15 @@ local Returns = table.freeze({
 	},
 	MainWeapon = {
 		On = function(Listener: (Value: number) -> ()): () -> ()
-			Events.Reliable[24] = Listener
+			table.insert(Events.Reliable[24], Listener)
 			for Index, Arguments in Queue.Reliable[24] do
 				Listener(table.unpack(Arguments))
 			end
 			Queue.Reliable[24] = {}
 			return function (): ()
-				if Events.Reliable[24] == Listener then
-					Events.Reliable[24] = nil
+				local Index = table.find(Events.Reliable[24], Listener)
+				if Index ~= nil then
+					table.remove(Events.Reliable[24], Index)
 				end
 			end
 		end
@@ -2646,14 +2653,15 @@ local Returns = table.freeze({
 	},
 	Stats = {
 		On = function(Listener: (Value: { level: number, xp: number, xpNext: number, hp: number, maxHp: number }) -> ()): () -> ()
-			Events.Reliable[30] = Listener
+			table.insert(Events.Reliable[30], Listener)
 			for Index, Arguments in Queue.Reliable[30] do
 				Listener(table.unpack(Arguments))
 			end
 			Queue.Reliable[30] = {}
 			return function (): ()
-				if Events.Reliable[30] == Listener then
-					Events.Reliable[30] = nil
+				local Index = table.find(Events.Reliable[30], Listener)
+				if Index ~= nil then
+					table.remove(Events.Reliable[30], Index)
 				end
 			end
 		end
