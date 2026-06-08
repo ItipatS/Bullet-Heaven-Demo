@@ -42,14 +42,14 @@ local Y_LERP      = 3
 local CHUNK       = 50      -- entries per unreliable packet (UfoPos/UfoBeam)
 -- normal laser bolt
 local FIRE_CD     = 1.8
-local BOLT_SPEED  = 70
+local BOLT_SPEED  = 35      -- normal UFO laser bolt speed (halved — was 70; slower = dodgeable)
 local BOLT_LIFE   = 2.5
 local BOLT_DMG    = 7
 local BOLT_HIT_R2 = 4 * 4
 -- elite/boss beam — fires in BURSTS (ON for BEAM_ON, then a COOLDOWN of BEAM_OFF, repeating) so it
 -- isn't a constant death ray. Each UFO is phase-staggered by id so they don't all fire in sync.
-local BEAM_FOLLOW = 2.5      -- endpoint lerp rate toward the player (low = slow/dodgeable)
-local BEAM_HIT_R2 = 6 * 6
+local BEAM_FOLLOW = 1.25     -- elite/boss beam tracking speed (halved — was 2.5; slower = dodgeable)
+local BEAM_HIT_R2 = 3 * 3    -- beam hit radius halved (was 6 → 3) — it was OP
 local BEAM_DPS    = 10
 local BOSS_BEAM_MUL = 1.8
 local BEAM_TELEGRAPH = 1.1      -- WARNING window before damage: a faint line tracks you so you can dodge

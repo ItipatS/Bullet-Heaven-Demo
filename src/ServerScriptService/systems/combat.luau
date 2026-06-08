@@ -291,20 +291,22 @@ local function beamStep(now: number, dt: number)
         local mods = world:get(ref(plr.UserId), PlayerMods)
         if not mods then continue end
         local pos = (root :: BasePart).Position
-        local ax, az = 0, 1
+        -- 3D aim: the beam follows VERTICAL pitch too (the streamed aim is player→cursor in 3D), so it
+        -- can sweep up at flying UFOs / down — not just along the ground plane.
+        local ax, ay, az = 0, 0, 1
         local dir = aim[plr]
         if dir then
-            local m = math.sqrt(dir.X * dir.X + dir.Z * dir.Z)
-            if m > 1e-3 then ax, az = dir.X / m, dir.Z / m end
+            local m = dir.Magnitude
+            if m > 1e-3 then ax, ay, az = dir.X / m, dir.Y / m, dir.Z / m end
         end
         local r2 = bm.width * bm.width
         local cc, cd = mods.crit, mods.critDmg
         local tick = bm.dmg * dt -- DPS → per-tick
         for s = 1, math.floor(bm.length / BEAM_STEP) do
             local d = s * BEAM_STEP
-            local sx, sz = pos.X + ax * d, pos.Z + az * d
-            aoeDamage(sx, pos.Y, sz, r2, tick, cc, cd, 0)
-            applySlow(sx, pos.Y, sz, r2, bm.slowFactor, SLOW_TICK + 0.2, now)
+            local sx, sy, sz = pos.X + ax * d, pos.Y + ay * d, pos.Z + az * d
+            aoeDamage(sx, sy, sz, r2, tick, cc, cd, 0)
+            applySlow(sx, sy, sz, r2, bm.slowFactor, SLOW_TICK + 0.2, now)
         end
     end
 end
@@ -437,7 +439,7 @@ local SKILLS: { [string]: (Player, number, BasePart, any, any, any, number, numb
     -- Unicorn "Taste the Rainbow": a slow sweeping rainbow beam that tracks aim (Final Spark).
     unicorn = function(plr, _now, _root, w, _state, mods)
         local life = 3.5 + (w.skillBubbles or 0) * 1.5 -- tree extends the beam
-        local dps = (w.dot * 3 + 30) * mods.damage
+        local dps = (w.dot * 3 + 10) * mods.damage
         startBeam(plr, life, dps, math.max(0.4, w.slowFactor), 4, 80)
     end,
     -- Cat "Nine Lives": a storm of boomerangs flung outward in a ring.

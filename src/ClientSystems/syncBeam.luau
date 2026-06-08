@@ -28,9 +28,12 @@ end
 
 local function aimDir(hrp: BasePart): Vector3
     if USE_STICK then
-        return flat(AimState.get())
+        return flat(AimState.get()) -- mobile thumbstick is 2D → beam stays horizontal
     end
-    return flat(mouse.Hit.Position - hrp.Position)
+    -- 3D player→cursor (matches what syncPet streams + what the server damages along), so the visual
+    -- tilt lines up with the authoritative hits.
+    local v = mouse.Hit.Position - hrp.Position
+    return if v.Magnitude > 1e-3 then v.Unit else Vector3.new(0, 0, -1)
 end
 
 local beam: BasePart? = nil

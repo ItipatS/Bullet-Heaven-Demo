@@ -89,8 +89,11 @@ local function step(dt: number)
         if USE_STICK then
             facing = AimState.get() -- world-space aim from the mobile thumbstick
         else
-            facing = mouse.UnitRay.Direction
-            facing = if facing.Magnitude > 1e-3 then facing.Unit else Vector3.new(0, 0, -1)
+            -- player → cursor target (3D): carries vertical pitch so the unicorn beam aims up/down (and
+            -- at flying UFOs). Flat weapons use only its XZ on the server, which is now character-relative
+            -- (aim AT the cursor target) rather than the camera ray — a wash-to-better for them.
+            local hitDir = mouse.Hit.Position - (root :: BasePart).Position
+            facing = if hitDir.Magnitude > 1e-3 then hitDir.Unit else Vector3.new(0, 0, -1)
         end
         sendAcc += dt
         if sendAcc >= SEND_DT then sendAcc = 0; blink.Aim.Fire(facing) end

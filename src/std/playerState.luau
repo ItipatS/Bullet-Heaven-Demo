@@ -124,7 +124,7 @@ local function defaults(): State
         damageMult = 1.0,
         critChance = 0.05,
         critDamage = 2.0,
-        hpRegen = 0.0,
+        hpRegen = 0.5, -- base passive regen for everyone (HP/sec); Regeneration cards stack on top
         pickupRange = 1.0,
         walkSpeed = 16,
         haste = 1.0,
