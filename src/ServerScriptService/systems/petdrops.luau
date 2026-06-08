@@ -1,8 +1,8 @@
 -- ServerScriptService/systems/petdrops.luau
--- PET pickups — the ONLY way to gain a new pet. A slain boss calls M.dropBoss(x,z); we pick a
--- pet nobody owns yet (so it's meaningful), resolve its floor Y once, and replicate it as a
--- floating world model. Players walk over it (spatial-hash proximity, same as EXP) to collect:
--- the pet unlocks (auto-equip or bench) and a Toast announces it. Exposes dropBoss + clearAll.
+-- PET pickups — a way to gain a new pet. PER-PLAYER (instanced, like EXP/Tix): a slain boss drops a
+-- pet FOR EACH player (owner-tagged, only theirs to see/collect), each picked from a pet THAT player
+-- doesn't own yet (a meaningful unlock) — so co-op is never a race. Walk over it (spatial-hash) → the
+-- pet unlocks + joins the run + a Toast. Exposes dropBoss + maybeDropElite + clearAll.
 --!optimize 2
 --!strict
 
@@ -29,7 +29,7 @@ local DUP_XP        = 40   -- consolation XP if you already own the dropped pet
 local FLOAT_Y       = 3    -- centre height above the floor (client floats it further)
 
 -- ── State ─────────────────────────────────────────────────────────────────────
-type Drop = { id: number, x: number, y: number, z: number, pet: string }
+type Drop = { id: number, owner: Player, x: number, y: number, z: number, pet: string }
 local drops: { [number]: Drop } = {}
 local nextId = 0
 
@@ -45,35 +45,45 @@ local function groundY(x: number, z: number): number
     return (hit and hit.Position.Y or 0) + FLOAT_Y
 end
 
--- ── Pet choice: prefer one nobody owns yet ────────────────────────────────────────
-local function pickPet(): string
-    local ownedByAll: { [string]: boolean } = {}
-    for _, plr in Players:GetPlayers() do
-        for _, id in PlayerState.ownedIds(plr) do ownedByAll[id] = true end
-    end
+-- ── Pet choice: prefer one THIS player doesn't own yet (a meaningful unlock) ─────────
+local function pickPetFor(plr: Player): string
+    local owned: { [string]: boolean } = {}
+    for _, id in PlayerState.ownedIds(plr) do owned[id] = true end
     local fresh: { string } = {}
     for _, id in Registry.order do
-        if not ownedByAll[id] then fresh[#fresh + 1] = id end
+        if not owned[id] then fresh[#fresh + 1] = id end
     end
     if #fresh > 0 then return fresh[math.random(1, #fresh)] end
-    return Registry.order[math.random(1, #Registry.order)] -- everyone owns everything → dup
+    return Registry.order[math.random(1, #Registry.order)] -- they own everything → dup (consolation XP)
 end
 
--- ── Net out ─────────────────────────────────────────────────────────────────────
+-- players actively in the arena — each gets their OWN pet drop (co-op is never a race).
+local function recipients(): { Player }
+    local r = {}
+    for _, plr in Players:GetPlayers() do
+        if PlayerState.get(plr).playing then r[#r + 1] = plr end
+    end
+    return r
+end
+
+-- ── Net out (PER-OWNER: only the owner sees + can collect their pet) ───────────────
 local function emitSpawn(d: Drop)
-    blink.PetDropSpawn.FireAll({ { id = d.id, pos = Vector3.new(d.x, d.y, d.z), pet = d.pet } })
+    if d.owner.Parent then blink.PetDropSpawn.Fire(d.owner, { { id = d.id, pos = Vector3.new(d.x, d.y, d.z), pet = d.pet } }) end
 end
 
 -- ── Public ────────────────────────────────────────────────────────────────────────
 local ELITE_PET_CHANCE = 0.2 -- an elite UNCOMMONLY drops a pet
 local M = {}
 
--- drop a pet pickup at (x,z) — prefers one nobody owns yet (a meaningful unlock)
+-- a boss died at (x,z) → a pet pickup FOR EACH player, each prefers one THAT player doesn't own yet
 function M.dropBoss(x: number, z: number)
-    nextId += 1
-    local d: Drop = { id = nextId, x = x, y = groundY(x, z), z = z, pet = pickPet() }
-    drops[nextId] = d
-    emitSpawn(d)
+    local y = groundY(x, z)
+    for _, plr in recipients() do
+        nextId += 1
+        local d: Drop = { id = nextId, owner = plr, x = x, y = y, z = z, pet = pickPetFor(plr) }
+        drops[nextId] = d
+        emitSpawn(d)
+    end
 end
 
 -- elite death: an uncommon chance to drop a pet
@@ -99,7 +109,7 @@ local function pickupStep()
         for j = 1, cnt do
             local id = out[j]
             local d = drops[id]
-            if d then
+            if d and d.owner == plr then -- only collect MY OWN pet drop
                 local dx, dz = d.x - rp.X, d.z - rp.Z
                 if dx * dx + dz * dz <= PICKUP_R2 then
                     drops[id] = nil
@@ -133,6 +143,15 @@ function M.clearAll()
     if #ids > 0 then blink.PetDropRemove.FireAll(ids) end
 end
 
+-- drop a leaving player's pet pickups (no one else can collect them)
+local function clearOwner(plr: Player)
+    local ids = {}
+    for id, d in drops do if d.owner == plr then ids[#ids + 1] = id end end
+    for _, id in ids do drops[id] = nil end
+    if #ids > 0 then blink.PetDropRemove.FireAll(ids) end
+end
+Players.PlayerRemoving:Connect(clearOwner)
+
 local acc = 0
 local function wrapper(dt: number)
     acc += dt
@@ -141,11 +160,11 @@ local function wrapper(dt: number)
     pickupStep()
 end
 
--- replay active drops to a joining player
+-- replay a joining player's OWN drops
 local function sendTo(player: Player)
     local batch: { blink.PetDrop } = {}
     for _id, d in drops do
-        batch[#batch + 1] = { id = d.id, pos = Vector3.new(d.x, d.y, d.z), pet = d.pet }
+        if d.owner == player then batch[#batch + 1] = { id = d.id, pos = Vector3.new(d.x, d.y, d.z), pet = d.pet } end
     end
     if #batch > 0 then blink.PetDropSpawn.Fire(player, batch) end
 end

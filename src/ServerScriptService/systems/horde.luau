@@ -50,6 +50,9 @@ local SEP_GAIN      = 1.4     -- separation weight vs steer (lower → less side
 local HASH_CELL     = 6       -- ≥ SEP_RADIUS
 local ADVANCE_DIST2 = 36      -- advance to next node within 6 studs (XZ); wider so the lane offset
                               -- below never strands a mob just shy of a node it can't quite reach
+local ADVANCE_FRAC  = 0.85    -- …OR once ≥85% ALONG the current edge (normalized progress). Node spacing-
+                              -- independent, so sparse / far-apart nodes still hand off instead of a mob
+                              -- orbiting one it can never get within ADVANCE_DIST2 of (the spin stall)
 local LANE_GAIN     = 0.12    -- per-mob perpendicular bias (small): a touch of spread without the
                               -- swirl/spin — vampire-survivors mobs CHARGE the player, not orbit
 local CORNER_CUT    = 0.3     -- blend the aim toward the node AFTER next → arc through turns
@@ -218,7 +221,10 @@ local function moveStep(dt: number)
             local p = if elen2 > 1e-4 then math.clamp(((nx - F.X) * ex + (nz - F.Z) * ez) / elen2, 0, 1) else 1
             ny = F.Y + (T.Y - F.Y) * p
             local tdx, tdz = nx - T.X, nz - T.Z
-            if tdx * tdx + tdz * tdz < ADVANCE_DIST2 then
+            -- advance when CLOSE to T (XZ) OR far enough ALONG the edge (progress p is normalized 0..1,
+            -- so it fires regardless of how far apart the nodes are) → a mob can't orbit a node it never
+            -- reaches within ADVANCE_DIST2 of.
+            if tdx * tdx + tdz * tdz < ADVANCE_DIST2 or p >= ADVANCE_FRAC then
                 world:set(e, PathNode, nextHop) -- advance (safe value-update)
             end
         else

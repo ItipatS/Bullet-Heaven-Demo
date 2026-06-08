@@ -1,8 +1,8 @@
 -- ServerScriptService/systems/carddrops.luau
--- CARD PACK pickups — dropped by slain BOSSES and ELITES. A pack is a floating world model
--- (Assets.Card); walk over it (spatial-hash proximity, same as EXP/pets) and it opens an upgrade
--- offer of 2-4 cards (new weapon / weapon upgrade / stat) on the picker's screen, via progression.
--- The pack is consumed for everyone the instant one player collects it. Exposes drop + clearAll.
+-- CARD PACK pickups — dropped by slain BOSSES and ELITES. PER-PLAYER (instanced, like EXP/Tix): a
+-- separate pack is created FOR EACH player in the run (owner-tagged, only sent to + collectible by
+-- them), so co-op loot is never a race — everyone gets to choose. A pack is a floating world model
+-- (Assets.Card); walk over it (spatial-hash proximity) → an upgrade offer of 3-5 cards. drop + clearAll.
 --!optimize 2
 --!strict
 
@@ -29,7 +29,7 @@ local PACK_MIN      = 3    -- a pack offers 3-5 cards
 local PACK_MAX      = 5
 
 -- ── State ─────────────────────────────────────────────────────────────────────
-type Drop = { id: number, x: number, y: number, z: number }
+type Drop = { id: number, owner: Player, x: number, y: number, z: number }
 local drops: { [number]: Drop } = {}
 local nextId = 0
 
@@ -45,18 +45,31 @@ local function groundY(x: number, z: number): number
     return (hit and hit.Position.Y or 0) + FLOAT_Y
 end
 
--- ── Net out ─────────────────────────────────────────────────────────────────────
-local function emitSpawn(d: Drop)
-    blink.CardDropSpawn.FireAll({ { id = d.id, pos = Vector3.new(d.x, d.y, d.z) } })
+-- players actively in the arena — each gets their OWN copy of every drop (gate on `playing`, so
+-- menu/lobby + ghost players are excluded; a briefly character-less alive player still counts).
+local function recipients(): { Player }
+    local r = {}
+    for _, plr in Players:GetPlayers() do
+        if PlayerState.get(plr).playing then r[#r + 1] = plr end
+    end
+    return r
 end
 
--- ── Public: a boss/elite died at (x,z) → drop a card pack ──────────────────────────
+-- ── Net out (PER-OWNER: only the owner sees + can collect their pack) ──────────────
+local function emitSpawn(d: Drop)
+    if d.owner.Parent then blink.CardDropSpawn.Fire(d.owner, { { id = d.id, pos = Vector3.new(d.x, d.y, d.z) } }) end
+end
+
+-- ── Public: a boss/elite died at (x,z) → drop a card pack FOR EACH player ───────────
 local M = {}
 function M.drop(x: number, z: number)
-    nextId += 1
-    local d: Drop = { id = nextId, x = x, y = groundY(x, z), z = z }
-    drops[nextId] = d
-    emitSpawn(d)
+    local y = groundY(x, z)
+    for _, plr in recipients() do
+        nextId += 1
+        local d: Drop = { id = nextId, owner = plr, x = x, y = y, z = z }
+        drops[nextId] = d
+        emitSpawn(d)
+    end
 end
 
 -- ── Pickup tick (proximity) ───────────────────────────────────────────────────────
@@ -77,7 +90,7 @@ local function pickupStep()
         for j = 1, cnt do
             local id = out[j]
             local d = drops[id]
-            if d then
+            if d and d.owner == plr then -- only collect MY OWN pack
                 local dx, dz = d.x - rp.X, d.z - rp.Z
                 if dx * dx + dz * dz <= PICKUP_R2 then
                     drops[id] = nil
@@ -99,6 +112,15 @@ function M.clearAll()
     if #ids > 0 then blink.CardDropRemove.FireAll(ids) end
 end
 
+-- drop a leaving player's packs (no one else can collect them)
+local function clearOwner(plr: Player)
+    local ids = {}
+    for id, d in drops do if d.owner == plr then ids[#ids + 1] = id end end
+    for _, id in ids do drops[id] = nil end
+    if #ids > 0 then blink.CardDropRemove.FireAll(ids) end
+end
+Players.PlayerRemoving:Connect(clearOwner)
+
 local acc = 0
 local function wrapper(dt: number)
     acc += dt
@@ -107,11 +129,11 @@ local function wrapper(dt: number)
     pickupStep()
 end
 
--- replay active packs to a joining player
+-- replay a joining player's OWN packs
 local function sendTo(player: Player)
     local batch: { blink.CardDrop } = {}
     for _id, d in drops do
-        batch[#batch + 1] = { id = d.id, pos = Vector3.new(d.x, d.y, d.z) }
+        if d.owner == player then batch[#batch + 1] = { id = d.id, pos = Vector3.new(d.x, d.y, d.z) } end
     end
     if #batch > 0 then blink.CardDropSpawn.Fire(player, batch) end
 end
