@@ -16,6 +16,7 @@ local Pet       = require(std:WaitForChild("pet"))
 local Config    = require(std:WaitForChild("config"))
 local AimState  = require(std:WaitForChild("aimState"))
 local Registry  = require(std:WaitForChild("petRegistry"))
+local clientState = require(std:WaitForChild("clientState"))
 
 local player = Players.LocalPlayer
 local mouse  = player:GetMouse()
@@ -66,7 +67,7 @@ local function rebuildLocalPets()
 end
 rebuildLocalPets()
 
-blink.Weapons.On(function(ids)
+clientState.onWeapons(function(ids)
     localIds = ids
     rebuildLocalPets()
 end)

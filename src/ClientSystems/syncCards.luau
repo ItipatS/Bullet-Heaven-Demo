@@ -14,6 +14,7 @@ local blink     = require(std:WaitForChild("ClientNet"))
 local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
+local clientState = require(std:WaitForChild("clientState"))
 local Registry  = require(std:WaitForChild("petRegistry"))
 local ItemReg   = require(std:WaitForChild("itemRegistry"))
 
@@ -297,7 +298,7 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 -- ── Net ───────────────────────────────────────────────────────────────────────
-blink.Stats.On(function(s)
+clientState.onStats(function(s)
     lvlLabel.Text = string.format("Lv %d   (%d/%d)", s.level, s.xp, s.xpNext)
     local frac = if s.xpNext > 0 then math.clamp(s.xp / s.xpNext, 0, 1) else 0
     xpFill.Size = UDim2.new(frac, 0, 1, 0)

@@ -10,7 +10,7 @@ local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 
 local std        = ReplicatedStorage.std
-local blink      = require(std:WaitForChild("ClientNet"))
+local clientState = require(std:WaitForChild("clientState"))
 local ItemReg    = require(std:WaitForChild("itemRegistry"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
 local Panels     = require(std:WaitForChild("panels"))
@@ -27,7 +27,7 @@ gui.Parent = playerGui
 -- menu row (right of centre): PETS | ITEMS — sits below the PLAY button, no overlap
 local openBtn = Instance.new("TextButton")
 openBtn.AnchorPoint = Vector2.new(0, 0.5)
-openBtn.Position = UDim2.new(0.5, 8, 0.575, 0)
+openBtn.Position = UDim2.new(0.5, 8, 0.525, 0)
 openBtn.Size = UDim2.new(0, 168, 0, 46)
 openBtn.BackgroundColor3 = Color3.fromRGB(80, 150, 90)
 openBtn.BorderSizePixel = 0
@@ -231,7 +231,7 @@ local function build()
     if selected then select(selected) end
 end
 
-blink.Items.On(function(listMsg)
+clientState.onItems(function(listMsg)
     table.clear(ownedLevels)
     for _, e in listMsg do ownedLevels[e.id] = e.level end
     refreshRowText()

@@ -15,6 +15,7 @@ local scheduler = require(std:WaitForChild("scheduler"))
 local blink     = require(std:WaitForChild("ClientNet"))
 local Registry  = require(std:WaitForChild("petRegistry"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
+local clientState = require(std:WaitForChild("clientState"))
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -108,8 +109,8 @@ local function tryUse()
 end
 
 btn.Activated:Connect(tryUse)
-blink.Weapons.On(function(ids) equipped = ids; refresh() end)
-blink.MainWeapon.On(function(m) main = m; refresh() end)
+clientState.onWeapons(function(ids) equipped = ids; refresh() end)
+clientState.onMain(function(m) main = m; refresh() end)
 
 UserInputService.InputBegan:Connect(function(input, gpe)
     if gpe then return end

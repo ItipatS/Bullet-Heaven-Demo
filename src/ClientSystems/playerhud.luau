@@ -11,7 +11,7 @@ local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 
 local std        = ReplicatedStorage.std
-local blink      = require(std:WaitForChild("ClientNet"))
+local clientState = require(std:WaitForChild("clientState"))
 local Registry   = require(std:WaitForChild("petRegistry"))
 local ItemReg    = require(std:WaitForChild("itemRegistry"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
@@ -135,13 +135,13 @@ local function renderStats()
     rHp.Text = string.format("❤ HP  %d / %d   ↻ %.2f/s", hp, maxHp, regen)
 end
 
-blink.Stats.On(function(s)
+clientState.onStats(function(s)
     hp = s.hp
     if s.maxHp and s.maxHp > 0 then maxHp = s.maxHp end
     renderStats()
 end)
 
-blink.StatSheet.On(function(s)
+clientState.onSheet(function(s)
     maxHp = s.maxHp
     regen = s.hpRegen
     renderStats()
@@ -159,7 +159,7 @@ end)
 renderStats()
 
 -- owned items → left-side badge column (icon + level), beside the weapon slots
-blink.Items.On(function(list)
+clientState.onItems(function(list)
     for i, entry in list do
         local b = itemBadges[i]
         if not b then b = makeItemBadge(i); itemBadges[i] = b end
@@ -279,11 +279,11 @@ local function rebuild()
     refreshMain()
 end
 
-blink.Weapons.On(function(ids)
+clientState.onWeapons(function(ids)
     equipped = ids
     rebuild()
 end)
-blink.MainWeapon.On(function(slot)
+clientState.onMain(function(slot)
     mainSlot = slot
     refreshMain()
 end)

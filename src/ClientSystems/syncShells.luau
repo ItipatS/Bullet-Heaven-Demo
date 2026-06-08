@@ -10,7 +10,7 @@ local Players           = game:GetService("Players")
 local std       = ReplicatedStorage.std
 local phases    = require(std:WaitForChild("phases"))
 local scheduler = require(std:WaitForChild("scheduler"))
-local blink     = require(std:WaitForChild("ClientNet"))
+local clientState = require(std:WaitForChild("clientState"))
 local Registry  = require(std:WaitForChild("petRegistry"))
 
 local Animals = ReplicatedStorage:WaitForChild("Animals")
@@ -55,7 +55,7 @@ local function setActive(on: boolean)
     end
 end
 
-blink.Weapons.On(function(ids)
+clientState.onWeapons(function(ids)
     local hasTurtle = false
     for _, id in ids do if id == "turtle" then hasTurtle = true break end end
     setActive(hasTurtle)

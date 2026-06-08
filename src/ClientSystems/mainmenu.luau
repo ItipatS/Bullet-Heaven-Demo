@@ -13,6 +13,7 @@ local RunService        = game:GetService("RunService")
 local std   = ReplicatedStorage.std
 local blink = require(std:WaitForChild("ClientNet"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
+local clientState = require(std:WaitForChild("clientState"))
 local Config = require(std:WaitForChild("config"))
 
 local player    = Players.LocalPlayer
@@ -115,7 +116,7 @@ best.TextColor3 = Color3.fromRGB(255, 215, 110)
 best.Text = ""
 best.Parent = gui
 
-blink.Profile.On(function(p)
+clientState.onProfile(function(p)
     local m, s = p.bestTime // 60, p.bestTime % 60
     best.Text = string.format(
         "⛁ %d Tix      Best: Wave %d  •  Lv %d  •  %d:%02d  •  %d kills  •  %d runs",

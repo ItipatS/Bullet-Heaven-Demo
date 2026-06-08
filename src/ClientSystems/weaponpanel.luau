@@ -15,6 +15,7 @@ local std      = ReplicatedStorage.std
 local blink    = require(std:WaitForChild("ClientNet"))
 local Registry = require(std:WaitForChild("petRegistry"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
+local clientState = require(std:WaitForChild("clientState"))
 local Panels   = require(std:WaitForChild("panels"))
 
 local player    = Players.LocalPlayer
@@ -31,7 +32,7 @@ gui.Parent = playerGui
 -- ── On-screen open button (menu row, left of centre — see itemtab for the right side) ──
 local openBtn = Instance.new("TextButton")
 openBtn.AnchorPoint = Vector2.new(1, 0.5)
-openBtn.Position = UDim2.new(0.5, -8, 0.575, 0)
+openBtn.Position = UDim2.new(0.5, -8, 0.525, 0)
 openBtn.Size = UDim2.new(0, 168, 0, 46)
 openBtn.BackgroundColor3 = Color3.fromRGB(68, 103, 247)
 openBtn.BorderSizePixel = 0
@@ -336,16 +337,16 @@ local function rebuild()
     if selected then select(selected) else refresh() end
 end
 
-blink.Unlocked.On(function(ids)
+clientState.onOwned(function(ids)
     table.clear(owned)
     for _, id in ids do owned[id] = true end
     if next(rows) == nil then rebuild() else refresh() end
 end)
-blink.Weapons.On(function(ids)
+clientState.onWeapons(function(ids)
     mainId = ids[1] -- slot 1 is the chosen main
     refresh()
 end)
-blink.TixCount.On(function(n)
+clientState.onTix(function(n)
     tix = n
     refresh()
 end)
