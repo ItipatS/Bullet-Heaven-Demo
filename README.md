@@ -18,10 +18,9 @@ Deep dives: **[`docs/SPEC.md`](docs/SPEC.md)** (the scale story + measured perf)
 
 ## Demo
 Two published places off one codebase — hop between them with an in-game button:
-- **▶ Real game:** https://www.roblox.com/games/79858913774130 — ramped, losable, clean.
-- **🎬 1000-mob showcase:** https://www.roblox.com/games/101281382095901 — instant ~1000 mobs,
-  invincible, FPS overlay on: the "1000 mobs, no lag" proof.
-- **Video:** [![Watch the video](https://img.youtube.com/vi/eprIcdV42WM/0.jpg)](https://youtu.be/eprIcdV42WM)
+- **▶ Real game:** https://www.roblox.com/games/79858913774130
+- **🎬 1000-mob showcase:** https://www.roblox.com/games/101281382095901 
+- **Video:** [![Watch the video](https://img.youtube.com/vi/APy7ou8omgM/0.jpg)](https://youtu.be/APy7ou8omgM)
 
 > The video shows an earlier build; the current one is the server-authoritative bullet-heaven below.
 
