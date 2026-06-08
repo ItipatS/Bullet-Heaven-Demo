@@ -185,8 +185,12 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ── Camera loop (drives the camera ONLY while spectating; mainmenu owns it otherwise) ─────────
+-- Gate on clientPlay (the single camera arbiter), NOT the local `spectating` bool — so the moment the
+-- round ends and mainmenu flips the state to "menu", this loop yields the camera even if our own
+-- RoundOver handler hasn't run yet. This + mainmenu gating on the same state = exactly one owner, no
+-- race when GameOver and RoundOver arrive together (the last/only player dying).
 RunService.Heartbeat:Connect(function(dt)
-    if not spectating then return end
+    if clientPlay.get() ~= "spectating" then return end
     local camera = workspace.CurrentCamera
     camera.CameraType = Enum.CameraType.Scriptable
 

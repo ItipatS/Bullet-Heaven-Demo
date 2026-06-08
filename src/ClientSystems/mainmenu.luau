@@ -121,59 +121,67 @@ if map then
     end
 end
 
-local orbiting = false
 local started = false
 local angle = 0
-local orbitConn: RBXScriptConnection? = nil
+local handingOver = false -- true during PLAY until the body warps in → keep orbiting over the void
 
--- Slow cinematic ORBIT around the map. Heartbeat (not RenderStepped) so it keeps running even when
--- the client isn't actively rendering; re-asserts Scriptable each frame since CurrentCamera can be
--- replaced on spawn.
-local function startOrbit()
-    if orbitConn then return end
-    orbiting = true
-    orbitConn = RunService.Heartbeat:Connect(function(dt)
-        if not orbiting then return end
-        angle += dt * 0.08 -- slow rotation
-        local camera = workspace.CurrentCamera
-        camera.CameraType = Enum.CameraType.Scriptable
-        local eye = center + Vector3.new(math.cos(angle) * orbitR, orbitH, math.sin(angle) * orbitR)
-        camera.CFrame = CFrame.lookAt(eye, center)
-    end)
-end
+-- Slow cinematic ORBIT around the map. ONE persistent Heartbeat loop; clientPlay is the single camera
+-- ARBITER, so this drives the camera ONLY at the menu (or briefly during the PLAY→warp handover) and
+-- can never fight gameover's spectate loop (which gates on the same state). Heartbeat (not
+-- RenderStepped) keeps it running when idle; re-asserts Scriptable each frame since CurrentCamera can
+-- be replaced on spawn.
+RunService.Heartbeat:Connect(function(dt)
+    local state = clientPlay.get()
+    if not (state == "menu" or (state == "playing" and handingOver)) then return end
+    angle += dt * 0.08 -- slow rotation
+    local camera = workspace.CurrentCamera
+    camera.CameraType = Enum.CameraType.Scriptable
+    local eye = center + Vector3.new(math.cos(angle) * orbitR, orbitH, math.sin(angle) * orbitR)
+    camera.CFrame = CFrame.lookAt(eye, center)
+end)
 
-local function stopOrbit()
-    orbiting = false
-    if orbitConn then orbitConn:Disconnect(); orbitConn = nil end
+-- Hand the camera to the live character. CRITICAL: bind CameraSubject explicitly — the orbit left the
+-- camera Scriptable since join, so the engine never auto-bound the Humanoid; flipping to Custom alone
+-- would leave it stuck at the last orbit CFrame with nothing to follow.
+local function handCameraToCharacter()
+    local char = player.Character
+    local hum = char and (char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 3))
+    local cam = workspace.CurrentCamera
+    if hum then cam.CameraSubject = hum :: Humanoid end
+    cam.CameraType = Enum.CameraType.Custom
 end
 
 -- Re-enter the menu (on join, and again when a round ends so a freed ghost can Play the next one).
 local function showMenu()
     started = false
+    handingOver = false
     gui.Enabled = true
-    startOrbit()
-    clientPlay.set("menu") -- loadout panel usable, gameplay HUD hidden
+    clientPlay.set("menu") -- loadout usable, HUD hidden; the orbit loop drives the camera off this state
 end
 
 local function play()
     if started then return end
     started = true
     gui.Enabled = false
+    handingOver = true        -- keep the orbit alive through the warp-in below
     clientPlay.set("playing") -- show the gameplay HUD + skill button, lock the loadout
     blink.Restart.Fire(1) -- starts a fresh round, OR joins the one in progress (server decides)
     -- KEEP the orbit until the server warps our (parked, anchored) body into the arena — only then
-    -- hand the camera over. Otherwise Custom would briefly snap to the lobby body off in the void.
-    -- Detect arrival by the root un-anchoring (warp-in) or a fresh body (the post-death reload).
+    -- hand the camera to the character. Otherwise it would snap to the lobby body off in the void.
+    -- Detect arrival by the root un-anchoring (warp-in) or a fresh body (the post-death reload). If we
+    -- die / the round ends mid-handover, bail WITHOUT grabbing the camera (state left "playing").
     task.spawn(function()
         local startChar = player.Character
         for _ = 1, 600 do -- ~10s safety cap
+            if clientPlay.get() ~= "playing" then return end -- state changed under us → don't touch the camera
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if (hrp and not (hrp :: BasePart).Anchored) or (char and char ~= startChar) then break end
             RunService.Heartbeat:Wait()
         end
-        stopOrbit()
-        workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+        if clientPlay.get() ~= "playing" then return end
+        handingOver = false       -- stop the orbit loop driving, THEN bind Custom to the character
+        handCameraToCharacter()
     end)
 end
 
@@ -186,5 +194,5 @@ end)
 -- Round ended on the server → ghosts are freed; come back to the menu so PLAY works again.
 blink.RoundOver.On(function() showMenu() end)
 
-startOrbit() -- orbit immediately on join
+-- clientPlay defaults to "menu", so the persistent orbit loop above already drives the camera on join.
 return 0
