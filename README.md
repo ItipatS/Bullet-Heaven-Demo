@@ -17,11 +17,13 @@ Deep dives: **[`docs/SPEC.md`](docs/SPEC.md)** (the scale story + measured perf)
 **[`docs/STATS.md`](docs/STATS.md)** (the data/stat architecture).
 
 ## Demo
-- **Place:** https://www.roblox.com/games/104444037041931/RPGJECS-DEMO
+Two published places off one codebase — hop between them with an in-game button:
+- **▶ Real game:** https://www.roblox.com/games/79858913774130 — ramped, losable, clean.
+- **🎬 1000-mob showcase:** https://www.roblox.com/games/101281382095901 — instant ~1000 mobs,
+  invincible, FPS overlay on: the "1000 mobs, no lag" proof.
 - **Video:** [![Watch the video](https://img.youtube.com/vi/eprIcdV42WM/0.jpg)](https://youtu.be/eprIcdV42WM)
 
-> The linked video shows the earlier ~150-mob RPG template this grew out of; the current build
-> is the server-authoritative bullet-heaven described below.
+> The video shows an earlier build; the current one is the server-authoritative bullet-heaven below.
 
 ---
 
@@ -177,10 +179,11 @@ runs.
 2. Regenerate the network layer if `Net.blink` changed: `blink Net.blink` →
    `src/std/ClientNet.luau` + `src/ServerScriptService/ServerNet.luau` (generated; don't hand-edit).
 3. Sync to Studio: `rojo serve` and connect the Rojo Studio plugin.
-4. Press Play. Showcase/debug toggles live in **`src/std/config.luau`**. The public build
-   intentionally ships them **on** — `STRESS_TEST` (≈1000 mobs on wave 1), `INVINCIBLE` (stand in
-   the horde and watch the FPS hold), `SHOW_FPS` (the proof overlay) — so the scale reads instantly.
-   Flip them **off** for a normal ramped, losable run.
+4. Press Play. The game ships as **two published places off one codebase**: a **showcase** place
+   (auto-enables `STRESS_TEST` + `INVINCIBLE` + `SHOW_FPS` → ~1000 mobs on join, invincible, FPS
+   overlay = "1000 mobs, no lag") and a **real-game** place (those off → ramped, losable, clean).
+   `config.luau` picks the mode from `game.PlaceId` (no hand-flipping), and the menu has a button
+   that teleports between them. Set `FORCE_SHOWCASE` in `config.luau` to test either mode in Studio.
 
 ## Honest limits
 

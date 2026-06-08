@@ -9,10 +9,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 local RunService        = game:GetService("RunService")
+local TeleportService   = game:GetService("TeleportService")
 
 local std   = ReplicatedStorage.std
 local blink = require(std:WaitForChild("ClientNet"))
 local clientPlay = require(std:WaitForChild("clientPlay"))
+local Config = require(std:WaitForChild("config"))
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -66,6 +68,46 @@ btn.TextColor3 = Color3.new(1, 1, 1)
 btn.Text = "▶  PLAY"
 btn.Parent = gui
 Instance.new("UICorner").Parent = btn
+
+-- ── Switch between the showcase place and the real game (TeleportService) ─────────
+-- Same codebase, two published places; config auto-detects which one we're in (Config.Places).
+local switchBtn = Instance.new("TextButton")
+switchBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+switchBtn.Position = UDim2.new(0.5, 0, 0.56, 0)
+switchBtn.Size = UDim2.new(0, 320, 0, 40)
+switchBtn.BackgroundColor3 = Color3.fromRGB(45, 55, 75)
+switchBtn.Font = Enum.Font.GothamBold
+switchBtn.TextSize = 18
+switchBtn.TextColor3 = Color3.fromRGB(220, 230, 245)
+switchBtn.Text = if Config.Places.IS_SHOWCASE then "🎮  Play the Real Game  →" else "🎬  See the 1000-Mob Showcase  →"
+switchBtn.Parent = gui
+Instance.new("UICorner").Parent = switchBtn
+
+local switchCaption = Instance.new("TextLabel")
+switchCaption.AnchorPoint = Vector2.new(0.5, 0.5)
+switchCaption.Position = UDim2.new(0.5, 0, 0.61, 0)
+switchCaption.Size = UDim2.new(0, 620, 0, 20)
+switchCaption.BackgroundTransparency = 1
+switchCaption.Font = Enum.Font.Gotham
+switchCaption.TextSize = 14
+switchCaption.TextColor3 = Color3.fromRGB(150, 160, 175)
+switchCaption.Text = if Config.Places.IS_SHOWCASE
+    then "Showcase: ~1000 server-authoritative mobs, invincible, FPS shown — no lag."
+    else "Curious about scale? The showcase runs ~1000 mobs with the FPS overlay — no lag."
+switchCaption.Parent = gui
+
+local teleporting = false
+switchBtn.Activated:Connect(function()
+    if teleporting then return end
+    teleporting = true
+    switchBtn.Text = "Teleporting…"
+    local target = if Config.Places.IS_SHOWCASE then Config.Places.REAL else Config.Places.SHOWCASE
+    local ok = pcall(function() TeleportService:Teleport(target, player) end)
+    if not ok then
+        teleporting = false
+        switchBtn.Text = "Teleport failed — try again"
+    end
+end)
 
 -- persisted best stats (from the DataStore profile)
 local best = Instance.new("TextLabel")

@@ -3,29 +3,36 @@
 -- tunables, and the mobile control scheme. Lives in ReplicatedStorage.std so the SERVER
 -- (SpawnMob/combat/ufo) and the CLIENT (aimstick/syncPet) read the exact same values.
 --
--- NOTE: the PUBLIC SHOWCASE build intentionally ships these Debug flags ON (not leftover debug) so
--- anyone sees ~1000 server-authoritative mobs + a steady FPS overlay the moment they join — the whole
--- point is "1000 mobs doesn't make the engine die." Flip them OFF for a normal ramped, losable game.
+-- TWO PLACES, ONE codebase. The SHOWCASE place auto-enables the demo flags (instant ~1000 mobs +
+-- invincible + FPS overlay = "1000 mobs, no lag"); the REAL-GAME place runs them OFF (ramped, losable,
+-- clean). Detected from game.PlaceId, so the same Rojo sync goes to both places and each behaves
+-- correctly with NO hand-flipping. The mainmenu "switch" button teleports between the two.
 --!strict
 
 local Config = {}
 
+-- ── Places (showcase ⇄ real game) ───────────────────────────────────────────────
+local SHOWCASE_PLACE = 101281382095901
+local REAL_PLACE     = 79858913774130
+-- Studio override: leave nil to auto-detect by PlaceId; set true/false to force a mode while testing.
+local FORCE_SHOWCASE: boolean? = nil
+local IS_SHOWCASE = if FORCE_SHOWCASE ~= nil then FORCE_SHOWCASE else game.PlaceId == SHOWCASE_PLACE
+Config.Places = { SHOWCASE = SHOWCASE_PLACE, REAL = REAL_PLACE, IS_SHOWCASE = IS_SHOWCASE }
+
 -- ── Debug / showcase toggles ────────────────────────────────────────────────────
--- These change gameplay. ON (current) = the public showcase: instant scale + invincible so a viewer
--- can stand in the horde and watch the FPS hold. OFF = a normal ramped, losable run.
+-- Place-driven (above): ON in the SHOWCASE place, OFF in the REAL-GAME place. These change gameplay.
 Config.Debug = {
-    -- Spawn STRESS_COUNT mobs on the very first wave (fast fill) instead of the normal
-    -- ramp, so you can stress the renderer/perf immediately. Later waves spawn normally.
-    STRESS_TEST  = true,
+    -- Spawn STRESS_COUNT mobs on the very first wave (fast fill) instead of ramping — showcase only.
+    STRESS_TEST  = IS_SHOWCASE,
     STRESS_COUNT = 1000,
 
-    -- The local player takes NO damage (contact + UFO bolts/beam). Lets you stand in the
-    -- horde to test scale without dying. Server-authoritative, so it must live here.
-    INVINCIBLE   = true,
+    -- Local player takes NO damage (contact + UFO bolts/beam) so a viewer can stand in the horde —
+    -- showcase only; the real game is losable. Server-authoritative, so it must live here.
+    INVINCIBLE   = IS_SHOWCASE,
 
-    -- On-screen FPS / frame-time / ping overlay (top-left). Mobile has no built-in FPS
-    -- display (Shift+F5 is PC-only), so this is how you read perf on a real phone.
-    SHOW_FPS     = true,
+    -- On-screen FPS / frame-time / ping overlay — the "no lag" proof. Showcase only; the real game
+    -- stays clean. (Mobile has no built-in FPS display, so this is how you read perf on a phone.)
+    SHOW_FPS     = IS_SHOWCASE,
 }
 
 -- ── Wave / spawn tunables (read by SpawnMob.luau) ───────────────────────────────
